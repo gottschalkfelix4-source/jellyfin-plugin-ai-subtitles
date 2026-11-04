@@ -164,6 +164,43 @@
                 </div>
 
                 <div class="verticalSection">
+                    <h3 class="sectionTitle">Alle Apps (TV, Handy, Apple TV …)</h3>
+                    <p class="fieldDescription">Die Übersetzung erscheint in jeder Jellyfin-App als normale Untertitelspur, z. B. „Deutsch (KI)“ – auch auf Samsung/LG-Fernsehern, Android TV, Apple TV, iPhone und Roku. Die Apps laden eine Spur immer am Stück: Beim ersten Mal erscheinen die Untertitel daher erst, wenn der ganze Film übersetzt ist (je nach Modell etwa 1–5 Minuten). Danach kommt die Spur sofort aus dem Cache.</p>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="EnableAppTracks" />
+                            <span>Übersetzte Spuren in allen Apps anbieten</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Die Spur wird nur für Titel angeboten, die Text-Untertitel haben und noch keine Spur in der jeweiligen Sprache. Übersetzt (und bezahlt) wird erst, wenn jemand die Spur auswählt.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="AppTrackLanguages" label="Sprachen als Spur (Codes, durch Komma getrennt, z. B. de, en)" />
+                        <div class="fieldDescription">Die Reihenfolge nicht nachträglich umstellen, sonst ändern sich die Spurnummern laufender Wiedergaben.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="AutoSelectAppTrack" />
+                            <span>Übersetzung automatisch auswählen</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Würde Jellyfin Untertitel in einer anderen Sprache einschalten als der bevorzugten Untertitelsprache des Benutzers (Benutzereinstellungen → Wiedergabe), wird stattdessen die Übersetzung gewählt.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="PrefetchNextEpisode" />
+                            <span>Nächste Folge im Voraus übersetzen</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Ist eine Folge fertig übersetzt, wird die nächste Folge der Serie im Hintergrund übersetzt, damit ihre Untertitel sofort da sind.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="AppTracksInWebClient" />
+                            <span>Spuren auch im Browser anzeigen</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Der Browser hat den Übersetzen-Button mit Live-Übersetzung; die zusätzlichen Spuren sind dort meist nicht nötig.</div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
                     <h3 class="sectionTitle">Cache</h3>
                     <p id="aiCacheInfo" class="fieldDescription">…</p>
                     <button is="emby-button" type="button" id="aiClearCache" class="raised button-alt emby-button"><span>Cache leeren</span></button>
@@ -183,9 +220,10 @@
             var pluginId = '7c3e9a51-2f4b-4d8e-9b61-5a0d2c8e4f17';
             var page = document.querySelector('#AiSubtitlesConfigPage');
             var textFields = ['OpenAiBaseUrl', 'OpenAiApiKey', 'OpenAiModel', 'OpenAiTemperature', 'AnthropicBaseUrl', 'AnthropicApiKey',
-                'AnthropicModel', 'DefaultTargetLanguage', 'Languages', 'ExtraInstructions'];
+                'AnthropicModel', 'DefaultTargetLanguage', 'Languages', 'ExtraInstructions', 'AppTrackLanguages'];
             var numberFields = ['BatchSize', 'ContextLines', 'MaxParallelRequests', 'RequestTimeoutSeconds'];
-            var boolFields = ['OpenAiJsonMode', 'AnthropicServerFallback', 'EnableWebPlayerIntegration', 'EnableSubtitleProvider', 'AllowNonAdminSave'];
+            var boolFields = ['OpenAiJsonMode', 'AnthropicServerFallback', 'EnableWebPlayerIntegration', 'EnableSubtitleProvider', 'AllowNonAdminSave',
+                'EnableAppTracks', 'AutoSelectAppTrack', 'PrefetchNextEpisode', 'AppTracksInWebClient'];
 
             function $(id) { return page.querySelector('#' + id); }
 

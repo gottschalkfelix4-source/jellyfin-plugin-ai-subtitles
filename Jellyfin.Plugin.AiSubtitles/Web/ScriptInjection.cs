@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.AiSubtitles.Web;
 
 /// <summary>
-/// Adds <see cref="ScriptInjectionMiddleware"/> in front of Jellyfin's pipeline.
+/// Adds the plugin's middlewares (script injection, tracks for all apps) in front of Jellyfin's pipeline.
 /// </summary>
 public class ScriptInjectionStartupFilter : IStartupFilter
 {
@@ -20,6 +20,7 @@ public class ScriptInjectionStartupFilter : IStartupFilter
         return app =>
         {
             app.UseMiddleware<ScriptInjectionMiddleware>();
+            app.UseMiddleware<AppTracks.AppTrackMiddleware>();
             next(app);
         };
     }

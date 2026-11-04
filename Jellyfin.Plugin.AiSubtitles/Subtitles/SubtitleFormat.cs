@@ -103,6 +103,28 @@ public static partial class SubtitleFormat
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Formats a single cue as an SRT or WebVTT block (without the WebVTT file header).
+    /// </summary>
+    /// <param name="cue">Cue.</param>
+    /// <param name="number">Running number (SRT only).</param>
+    /// <param name="vtt">Whether to write WebVTT.</param>
+    /// <returns>Cue block including the trailing blank line.</returns>
+    public static string FormatCue(SubtitleCue cue, int number, bool vtt)
+    {
+        var sb = new StringBuilder();
+        if (!vtt)
+        {
+            sb.Append(number).Append('\n');
+        }
+
+        var separator = vtt ? '.' : ',';
+        var text = vtt ? cue.Text.Replace("-->", "->", StringComparison.Ordinal) : cue.Text;
+        sb.Append(FormatTime(cue.StartMs, separator)).Append(" --> ").Append(FormatTime(cue.EndMs, separator)).Append('\n');
+        sb.Append(text).Append("\n\n");
+        return sb.ToString();
+    }
+
     private static string Clean(string text)
     {
         text = AssTagRegex().Replace(text, string.Empty);

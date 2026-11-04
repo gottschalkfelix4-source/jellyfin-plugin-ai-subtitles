@@ -1,6 +1,6 @@
 # AI Subtitle Translator – Jellyfin-Plugin
 
-Ein Plugin für Jellyfin, das die **vorhandenen Untertitel** eines Films oder einer Folge **live im Player** in eine beliebige Sprache übersetzt. Angebunden wird ein KI-Modell entweder über einen **OpenAI-kompatiblen Endpunkt** (OpenAI, Ollama, LM Studio, OpenRouter, vLLM, LocalAI …) oder direkt über die **Anthropic-API (Claude)**.
+Ein Plugin für Jellyfin, das die **vorhandenen Untertitel** eines Films oder einer Folge **live im Player** in eine beliebige Sprache übersetzt – im Browser über einen eigenen Button, in allen anderen Jellyfin-Apps (Fernseher, Apple TV, Handy) als zusätzliche Untertitelspur. Angebunden wird ein KI-Modell entweder über einen **OpenAI-kompatiblen Endpunkt** (OpenAI, Ollama, LM Studio, OpenRouter, vLLM, LocalAI …) oder direkt über die **Anthropic-API (Claude)**.
 
 Es ist ein reines Server-Plugin: Es wird über den Plugin-Katalog von Jellyfin installiert und läuft im Jellyfin-Server selbst. Zusätzliche Dienste oder Container braucht es nicht.
 
@@ -38,6 +38,13 @@ Voraussetzung: **Jellyfin 12.4** oder neuer.
 - Die gewählte Sprache wird gemerkt; bei der nächsten Folge übersetzt das Plugin automatisch weiter, bis „Aus“ gewählt wird.
 - „Als Untertitel speichern“: übersetzt komplett und legt das Ergebnis als normale Untertitelspur am Titel ab. Danach steht es in **allen** Clients zur Verfügung, auch in TV-Apps.
 - „SRT herunterladen“
+
+**In allen anderen Apps** (Samsung- und LG-Fernseher, Android TV, Apple TV, iPhone/iPad, Android, Roku, Kodi …) erscheint die Übersetzung als ganz normale Untertitelspur, z. B. **„Deutsch (KI) – aus English“**. An den Apps muss dafür nichts installiert oder eingestellt werden:
+
+- Die Spur wird für jeden Titel angeboten, der Text-Untertitel hat, aber noch keine Spur in der Zielsprache. Welche Sprachen als Spur erscheinen, steht in den Einstellungen unter *Alle Apps* (Standard: Deutsch).
+- Übersetzt wird erst, wenn jemand die Spur auswählt. Fertige Übersetzungen kommen danach sofort aus dem Cache – auch für andere Benutzer und Geräte.
+- **Automatische Auswahl:** Würde Jellyfin Untertitel in einer anderen Sprache einschalten als der bevorzugten Untertitelsprache des Benutzers, wird stattdessen die Übersetzung gewählt.
+- **Serien:** Ist eine Folge fertig, wird die nächste Folge im Hintergrund übersetzt, damit ihre Untertitel beim Weiterschauen sofort da sind.
 
 **In „Untertitel suchen“** (Dialog in der Titelansicht, in allen Clients mit Untertitelsuche) erscheint für jede vorhandene Text-Spur ein Eintrag „KI-Übersetzung … → Sprache“. Beim Herunterladen wird komplett übersetzt und gespeichert. Der automatische Untertitel-Download des Servers wird bewusst ignoriert, damit nicht unbemerkt ganze Bibliotheken übersetzt werden.
 
@@ -85,11 +92,15 @@ Grobe Kosten für einen Spielfilm mit ca. 1.500 Untertitelzeilen: mit `claude-op
 
 ## Welche Clients können was?
 
-| Client | Live im Player | gespeicherte Übersetzung |
+| Client | Übersetzen-Button (live, abschnittsweise) | Spur „Sprache (KI)“ im Untertitelmenü |
 |---|---|---|
-| Browser (jellyfin-web) | ✔ | ✔ |
-| Jellyfin Media Player, Android-App (nutzen die Server-Oberfläche) | ✔ | ✔ |
-| Android TV, Swiftfin, Roku, Kodi u. a. native Apps | ✘ | ✔ (über „Untertitel suchen“ oder „Als Untertitel speichern“) |
+| Browser (jellyfin-web) | ✔ | optional (Einstellung „Spuren auch im Browser anzeigen“) |
+| Jellyfin Media Player, Android-App, LG webOS (nutzen die Server-Oberfläche) | ✔ | ✔ |
+| Samsung Tizen, Android TV / Fire TV, Swiftfin (iPhone, iPad, Apple TV), Roku, Kodi u. a. | ✘ | ✔ |
+
+Der Unterschied: Der Übersetzen-Button übersetzt ab der aktuellen Stelle und zeigt die ersten Untertitel nach wenigen Sekunden. Die anderen Apps laden eine Untertitelspur immer als ganze Datei. Beim **ersten** Abspielen eines Titels erscheinen die Untertitel dort deshalb erst, wenn der ganze Titel übersetzt ist – bei einem Spielfilm je nach Modell etwa 1–5 Minuten (schneller mit `claude-haiku-5-5` oder mehr *parallelen KI-Anfragen*). Ab dann und für jede vorbereitete nächste Folge ist die Spur sofort da.
+
+Apps, die keine externen Text-Untertitel laden können (sie melden das in ihrem Geräteprofil), bekommen die Spur nicht angezeigt.
 
 ## Funktionsweise
 
@@ -105,6 +116,7 @@ Plugin ── ISubtitleEncoder (Jellyfin) → Original als SRT → Abschnitte à
 - Das Player-Skript wird beim Ausliefern in die `index.html` des Web-Clients eingefügt (Middleware). Die Datei auf der Platte bleibt unverändert, das funktioniert also auch, wenn das Web-Verzeichnis schreibgeschützt ist.
 - Die Abspielposition liest das Skript aus den Fortschrittsmeldungen, die jellyfin-web ohnehin an den Server schickt. So stimmt die Zeit auch beim Transcoding.
 - Gleiche Abschnitte, die mehrere Zuschauer zugleich anfordern, werden nur einmal übersetzt.
+- **Spuren für alle Apps:** Eine Middleware ergänzt die Antworten von `/Items/{id}/PlaybackInfo` und `/Items/{id}` um zusätzliche Untertitelspuren mit eigenen Indizes ab 100000 (externe SRT- oder WebVTT-Datei, passend zum Geräteprofil der App). Fragt eine App `/Videos/{id}/{quelle}/Subtitles/{index}/…/Stream.srt` für einen solchen Index an, liefert das Plugin die Übersetzung: abschnittsweise in Reihenfolge, mit Leerzeilen als Keep-alive, damit Player mit kurzem Lese-Timeout nicht abbrechen. Die Übersetzung läuft weiter, auch wenn die App die Verbindung trennt. Jellyfin selbst bekommt den virtuellen Index nie zu sehen (er wird in Anfragen durch „keine Untertitel“ ersetzt), damit der Server nicht versucht, eine nicht vorhandene Spur einzubrennen.
 
 Falls die Einbindung nicht greift (Hinweis auf der Einstellungsseite), lässt sich das Skript alternativ über das Plugin „JavaScript Injector“ laden: `<server>/AiSubtitles/ClientScript`.
 
@@ -118,6 +130,7 @@ Falls die Einbindung nicht greift (Hinweis auf der Einstellungsseite), lässt si
 | GET | `/AiSubtitles/Plan/{itemId}?mediaSourceId=&streamIndex=` | Abschnitte |
 | GET | `/AiSubtitles/Batch/{itemId}?…&lang=&batch=&batchSize=` | einen Abschnitt übersetzen |
 | GET | `/AiSubtitles/File/{itemId}?…&lang=&format=srt\|vtt` | komplette Übersetzung als Datei |
+| GET | `/AiSubtitles/AppTrack/{itemId}/{mediaSourceId}/{index}/Stream.srt\|vtt` | Spur für alle Apps (wird über `/Videos/…/Subtitles/{index}/…` erreicht) |
 | POST | `/AiSubtitles/Save/{itemId}?…&lang=` | komplett übersetzen und als Untertitel speichern |
 | POST | `/AiSubtitles/Test?lang=` | Verbindungstest (Admin) |
 | GET/POST | `/AiSubtitles/CacheInfo`, `/AiSubtitles/ClearCache` | Cache (Admin) |
@@ -154,6 +167,7 @@ Jellyfin.Plugin.AiSubtitles/
   Translation/     Abschnitte, Prompt, Cache, Sprachauflösung
   Api/             REST-Controller
   Web/             Player-Skript, Skript-Einbindung
+  AppTracks/       Spuren für alle Apps (Middleware, Auswahl, Hintergrund-Übersetzung)
 Jellyfin.Plugin.AiSubtitles.Tests/   Parser-, Antwort- und Endpunkt-Tests (lokaler Fake-Server)
 scripts/update-manifest.ps1          trägt eine Version in manifest.json ein
 manifest.json                        Jellyfin-Plugin-Repository (wird vom Release-Workflow gepflegt)
@@ -163,4 +177,6 @@ manifest.json                        Jellyfin-Plugin-Repository (wird vom Releas
 
 - Bild-Untertitel (PGS/VobSub) bräuchten OCR und werden nicht unterstützt.
 - „Speichern“ und der Download aus „Untertitel suchen“ übersetzen den ganzen Film in einem Request. Liegt ein Reverse-Proxy mit kurzem Timeout davor (z. B. 60 s), kann der Request abbrechen. Die Übersetzung läuft serverseitig trotzdem weiter und landet im Cache, sodass ein zweiter Versuch sofort fertig ist.
+- Die Spuren für alle Apps beruhen darauf, dass die Apps ihre Untertitelliste aus den Antworten des Servers aufbauen und externe Untertitel über die Server-URL laden. Das tun die offiziellen Apps; Drittanbieter-Apps, die Untertitel auf eigenem Weg laden, zeigen die Spur unter Umständen nicht.
+- Ändert man die Reihenfolge der Sprachen unter *Alle Apps*, ändern sich die Spurnummern. Laufende Wiedergaben müssen dann neu gestartet werden.
 - Das Player-Skript hängt sich an die Oberfläche von jellyfin-web (`.videoOsdBottom .btnSubtitles`, `.videoPlayerContainer`). Größere Umbauten des Web-Clients in künftigen Versionen können Anpassungen nötig machen.

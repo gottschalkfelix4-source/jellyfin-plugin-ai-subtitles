@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.AiSubtitles.AppTracks;
 using Jellyfin.Plugin.AiSubtitles.Providers;
 using Jellyfin.Plugin.AiSubtitles.Subtitles;
 using Jellyfin.Plugin.AiSubtitles.Translation;
@@ -24,6 +25,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<TranslationCache>();
         serviceCollection.AddSingleton<SubtitleSourceService>();
         serviceCollection.AddSingleton<TranslationService>();
+        serviceCollection.AddSingleton<AppTrackService>();
 
         // AiSubtitleProvider (ISubtitleProvider) is discovered automatically by Jellyfin's export scan.
         serviceCollection.AddTransient<IStartupFilter, ScriptInjectionStartupFilter>();

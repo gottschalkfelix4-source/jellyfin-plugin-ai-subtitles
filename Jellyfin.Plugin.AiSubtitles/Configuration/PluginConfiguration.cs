@@ -136,4 +136,32 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether non-admin users may save translations as subtitle files.
     /// </summary>
     public bool AllowNonAdminSave { get; set; }
+
+    // ---------- Tracks for all apps ----------
+
+    /// <summary>
+    /// Gets or sets a value indicating whether translated tracks are offered as regular subtitle tracks to every client.
+    /// </summary>
+    public bool EnableAppTracks { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the languages offered as tracks in all apps (codes, separated by comma or space).
+    /// </summary>
+    public string AppTrackLanguages { get; set; } = "de";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the tracks are also listed in the browser (which has its own live menu).
+    /// </summary>
+    public bool AppTracksInWebClient { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the translated track is preselected when the server would otherwise
+    /// show subtitles in another language than the user's preferred subtitle language.
+    /// </summary>
+    public bool AutoSelectAppTrack { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the next episode is translated in the background.
+    /// </summary>
+    public bool PrefetchNextEpisode { get; set; } = true;
 }
