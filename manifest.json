@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.1.0.0",
+        "changelog": "https://github.com/gottschalkfelix4-source/jellyfin-plugin-ai-subtitles/releases/tag/v1.1.0.0",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/gottschalkfelix4-source/jellyfin-plugin-ai-subtitles/releases/download/v1.1.0.0/ai-subtitle-translator_1.1.0.0.zip",
+        "checksum": "03a46668c1019fa53dd5daed440ee65a",
+        "timestamp": "2026-11-04T12:03:25Z"
+      },
+      {
         "version": "1.0.0.0",
         "changelog": "https://github.com/gottschalkfelix4-source/jellyfin-plugin-ai-subtitles/releases/tag/v1.0.0.0",
         "targetAbi": "12.4.0.0",
