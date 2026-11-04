@@ -150,4 +150,33 @@ public class AppTrackMiddlewareTests
         await middleware.InvokeAsync(browser);
         Assert.Equal(5, JsonNode.Parse(await ReadResponse(browser))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
     }
+
+    private const string Master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nmain.m3u8?MediaSourceId=ms1\n";
+
+    private static RequestDelegate RespondPlaylist() => async ctx =>
+    {
+        ctx.Response.StatusCode = 200;
+        ctx.Response.ContentType = "application/x-mpegURL";
+        await ctx.Response.WriteAsync(Master);
+    };
+
+    [Theory]
+    [InlineData("?MediaSourceId=ms1&SubtitleMethod=Encode&ApiKey=k", true)]   // Encode without index: nothing is burned in
+    [InlineData("?MediaSourceId=ms1&SubtitleStreamIndex=4&SubtitleMethod=Hls&ApiKey=k", true)] // translated track chosen
+    [InlineData("?MediaSourceId=ms1&SubtitleStreamIndex=3&SubtitleMethod=Encode&ApiKey=k", false)] // real subtitle burned in
+    public async Task MasterPlaylistForApplePlayer(string query, bool expectTrack)
+    {
+        var middleware = new AppTrackMiddleware(RespondPlaylist(), CreateService(), NullLogger<AppTrackMiddleware>.Instance);
+        var context = Context("GET", $"/videos/{ItemId}/master.m3u8", query);
+        context.Request.Headers.UserAgent = "AppleCoreMedia/1.0.0.23A341 (iPhone; U; CPU OS 26_0 like Mac OS X; de_de)";
+
+        await middleware.InvokeAsync(context);
+
+        var playlist = await ReadResponse(context);
+        Assert.Equal(expectTrack, playlist.Contains("ms1/Subtitles/4/subtitles.m3u8", System.StringComparison.Ordinal));
+        if (query.Contains("SubtitleStreamIndex=4", System.StringComparison.Ordinal))
+        {
+            Assert.Contains("DEFAULT=YES", playlist);
+        }
+    }
 }

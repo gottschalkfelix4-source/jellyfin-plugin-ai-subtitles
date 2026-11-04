@@ -181,17 +181,20 @@ public partial class AppTrackMiddleware
             || userAgent.Contains("AVPlayer", StringComparison.OrdinalIgnoreCase);
         var hlsRequested = string.Equals(originalMethod, "Hls", StringComparison.OrdinalIgnoreCase)
             || string.Equals(request.Query["EnableSubtitlesInManifest"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
-        var burnIn = string.Equals(originalMethod, "Encode", StringComparison.OrdinalIgnoreCase);
-
-        // Apple's player can only show subtitles that are part of the HLS stream.
-        if (burnIn || !(appleCoreMedia || hlsRequested) || !Guid.TryParse(itemId, out var itemGuid))
+        if (!(appleCoreMedia || hlsRequested) || !Guid.TryParse(itemId, out var itemGuid))
         {
             await _next(context).ConfigureAwait(false);
             return;
         }
 
         var layout = _service.GetLayout(itemGuid, request.Query["MediaSourceId"].FirstOrDefault());
-        if (layout is null)
+
+        // Only a real subtitle that is burned into the picture rules out extra tracks. Jellyfin also writes
+        // "SubtitleMethod=Encode" without any subtitle index (e.g. after a translated track was preselected).
+        var burnIn = string.Equals(originalMethod, "Encode", StringComparison.OrdinalIgnoreCase)
+            && requested is int index && index >= 0
+            && layout?.Tracks.Any(t => t.Index == index) != true;
+        if (layout is null || burnIn)
         {
             await _next(context).ConfigureAwait(false);
             return;
