@@ -1,6 +1,27 @@
 # AI Subtitle Translator – Jellyfin-Plugin
 
-Übersetzt die **vorhandenen Untertitel** eines Films oder einer Folge **live im Player** in eine beliebige Sprache. Angebunden wird ein KI-Modell entweder über einen **OpenAI-kompatiblen Endpunkt** (OpenAI, Ollama, LM Studio, OpenRouter, vLLM, LocalAI …) oder direkt über die **Anthropic-API (Claude)**.
+Ein Plugin für Jellyfin, das die **vorhandenen Untertitel** eines Films oder einer Folge **live im Player** in eine beliebige Sprache übersetzt. Angebunden wird ein KI-Modell entweder über einen **OpenAI-kompatiblen Endpunkt** (OpenAI, Ollama, LM Studio, OpenRouter, vLLM, LocalAI …) oder direkt über die **Anthropic-API (Claude)**.
+
+Es ist ein reines Server-Plugin: Es wird über den Plugin-Katalog von Jellyfin installiert und läuft im Jellyfin-Server selbst. Zusätzliche Dienste oder Container braucht es nicht.
+
+## Installation
+
+1. In Jellyfin **Dashboard → Plugins → Repositories** (je nach Version auch *Katalog → Zahnrad*) öffnen und ein neues Repository hinzufügen:
+   - **Name:** `AI Subtitle Translator`
+   - **URL:**
+     ```
+     https://raw.githubusercontent.com/gottschalkfelix4-source/jellyfin-plugin-ai-subtitles/main/manifest.json
+     ```
+2. Im **Katalog** unter *Subtitles* **AI Subtitle Translator** auswählen und installieren.
+3. Jellyfin neu starten.
+4. Dashboard → Plugins → **AI Subtitle Translator**: Anbieter einrichten und „Speichern & Verbindung testen“ klicken.
+5. Den Browser-Tab mit Jellyfin einmal neu laden. Danach erscheint im Video-Player der Übersetzen-Button.
+
+Updates erscheinen über dasselbe Repository automatisch im Katalog.
+
+Voraussetzung: **Jellyfin 12.4** oder neuer.
+
+## Überblick
 
 - Zielversion: **Jellyfin 12.4** (.NET 10)
 - Quelle: alle Text-Untertitel, die Jellyfin kennt – eingebettet (MKV/MP4) oder extern (SRT, ASS/SSA, WebVTT …)
@@ -22,15 +43,9 @@
 
 **Cache:** Jeder übersetzte Abschnitt wird im Datenordner des Plugins auf dem Server gespeichert (Unterordner `translations` unter `plugins/`). Wer eine Stelle noch einmal ansieht oder später speichert, verursacht keine neuen Kosten.
 
-## Installation (Unraid / Docker)
+### Manuelle Installation (ohne Repository)
 
-1. Paket bauen (siehe unten) oder den fertigen Ordner `artifacts\AI Subtitle Translator_1.0.0.0` nehmen.
-2. Den Ordner in das Plugin-Verzeichnis des Jellyfin-Containers kopieren. Beim offiziellen Image ist das `/config/plugins/`, auf Unraid meist
-   `/mnt/user/appdata/jellyfin/plugins/` bzw. `/mnt/user/appdata/jellyfin/config/plugins/` – je nachdem, wohin `/config` gemappt ist.
-   Ergebnis: `…/plugins/AI Subtitle Translator_1.0.0.0/` mit drei DLLs und `meta.json`.
-3. Container neu starten.
-4. Dashboard → Plugins → **AI Subtitle Translator** öffnen, Anbieter einrichten, „Speichern & Verbindung testen“.
-5. Den Browser-Tab mit Jellyfin einmal neu laden. Oben auf der Einstellungsseite steht, ob das Player-Skript ausgeliefert wird.
+Das ZIP der gewünschten Version unter [Releases](https://github.com/gottschalkfelix4-source/jellyfin-plugin-ai-subtitles/releases) herunterladen und in einen Ordner `AI Subtitle Translator_<Version>` im Plugin-Verzeichnis von Jellyfin entpacken (`<Jellyfin-Konfiguration>/plugins/`). Danach Jellyfin neu starten.
 
 ## Einrichtung
 
@@ -87,7 +102,7 @@ Plugin ── ISubtitleEncoder (Jellyfin) → Original als SRT → Abschnitte à
                           └ nein → KI (OpenAI-kompatibel | Anthropic-SDK) → Cache
 ```
 
-- Das Player-Skript wird beim Ausliefern in die `index.html` des Web-Clients eingefügt (Middleware). Die Datei auf der Platte bleibt unverändert, und das funktioniert auch bei schreibgeschützten Docker-Images.
+- Das Player-Skript wird beim Ausliefern in die `index.html` des Web-Clients eingefügt (Middleware). Die Datei auf der Platte bleibt unverändert, das funktioniert also auch, wenn das Web-Verzeichnis schreibgeschützt ist.
 - Die Abspielposition liest das Skript aus den Fortschrittsmeldungen, die jellyfin-web ohnehin an den Server schickt. So stimmt die Zeit auch beim Transcoding.
 - Gleiche Abschnitte, die mehrere Zuschauer zugleich anfordern, werden nur einmal übersetzt.
 
@@ -117,7 +132,16 @@ dotnet test
 powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.0.0.0
 ```
 
-`package.ps1` erzeugt `artifacts\AI Subtitle Translator_<Version>\` (direkt kopierbar) und ein ZIP samt MD5.
+`package.ps1` erzeugt `artifacts/AI Subtitle Translator_<Version>/` und das ZIP samt MD5.
+
+### Neue Version veröffentlichen
+
+```powershell
+git tag v1.0.1.0
+git push origin v1.0.1.0
+```
+
+Der Workflow `.github/workflows/release.yml` testet und baut das Plugin, legt ein GitHub-Release mit dem ZIP an und trägt die Version mit Prüfsumme in `manifest.json` ein. Jellyfin-Server, die das Repository eingetragen haben, sehen das Update danach im Katalog. Bei einer neuen Jellyfin-Hauptversion `TargetAbi` in `package.ps1`/`scripts/update-manifest.ps1` und die Paketversionen in den `.csproj`-Dateien anheben.
 
 Projektstruktur:
 
@@ -131,6 +155,8 @@ Jellyfin.Plugin.AiSubtitles/
   Api/             REST-Controller
   Web/             Player-Skript, Skript-Einbindung
 Jellyfin.Plugin.AiSubtitles.Tests/   Parser-, Antwort- und Endpunkt-Tests (lokaler Fake-Server)
+scripts/update-manifest.ps1          trägt eine Version in manifest.json ein
+manifest.json                        Jellyfin-Plugin-Repository (wird vom Release-Workflow gepflegt)
 ```
 
 ## Grenzen

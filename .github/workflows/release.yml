@@ -1,0 +1,57 @@
+# Baut bei einem Tag "v1.2.3.4" das Plugin, legt ein GitHub-Release mit dem ZIP an
+# und trägt die Version in manifest.json (Jellyfin-Plugin-Repository) auf main ein.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Tests
+        run: dotnet test -c Release
+
+      - name: Version aus Tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Paket bauen
+        shell: pwsh
+        run: ./package.ps1 -Version $env:VERSION -Changelog "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+
+      - name: GitHub-Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "artifacts/ai-subtitle-translator_${VERSION}.zip" \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+
+      - name: Manifest auf main aktualisieren
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          ./scripts/update-manifest.ps1 -Version $env:VERSION `
+            -ZipPath "artifacts/ai-subtitle-translator_$($env:VERSION).zip" `
+            -Repository "${{ github.repository }}" `
+            -Changelog "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Manifest: Version $($env:VERSION)"
+          git push origin main
