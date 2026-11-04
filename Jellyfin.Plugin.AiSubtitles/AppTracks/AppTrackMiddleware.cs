@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.AiSubtitles.Subtitles;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,7 @@ public partial class AppTrackMiddleware
 
     private readonly RequestDelegate _next;
     private readonly AppTrackService _service;
+    private readonly SubtitleSourceService _sourceService;
     private readonly ILogger<AppTrackMiddleware> _logger;
 
     /// <summary>
@@ -32,11 +34,13 @@ public partial class AppTrackMiddleware
     /// </summary>
     /// <param name="next">Next delegate.</param>
     /// <param name="service">Track service.</param>
+    /// <param name="sourceService">Subtitle source service.</param>
     /// <param name="logger">Logger.</param>
-    public AppTrackMiddleware(RequestDelegate next, AppTrackService service, ILogger<AppTrackMiddleware> logger)
+    public AppTrackMiddleware(RequestDelegate next, AppTrackService service, SubtitleSourceService sourceService, ILogger<AppTrackMiddleware> logger)
     {
         _next = next;
         _service = service;
+        _sourceService = sourceService;
         _logger = logger;
     }
 
@@ -57,18 +61,28 @@ public partial class AppTrackMiddleware
         var request = context.Request;
         var path = request.Path.Value ?? string.Empty;
 
-        // 1. Subtitle file of a translated track -> plugin endpoint.
+        // 1. Subtitle file or HLS playlist of a translated track -> plugin endpoint.
         var subtitle = SubtitlePathRegex().Match(path);
         if (subtitle.Success && int.TryParse(subtitle.Groups["idx"].Value, out var subtitleIndex) && AppTrackInjector.IsVirtual(subtitleIndex))
         {
+            var file = subtitle.Groups["fmt"].Success ? "Stream." + subtitle.Groups["fmt"].Value : "subtitles.m3u8";
             request.Path = new PathString(subtitle.Groups["prefix"].Value
-                + $"/AiSubtitles/AppTrack/{subtitle.Groups["item"].Value}/{subtitle.Groups["ms"].Value}/{subtitleIndex}/Stream.{subtitle.Groups["fmt"].Value}");
+                + $"/AiSubtitles/AppTrack/{subtitle.Groups["item"].Value}/{subtitle.Groups["ms"].Value}/{subtitleIndex}/{file}");
             await _next(context).ConfigureAwait(false);
             return;
         }
 
+        var originalMethod = request.Query["SubtitleMethod"].FirstOrDefault();
+
         // 2. Jellyfin itself must never see a virtual index (it would try to burn in a stream that does not exist).
         var requested = StripVirtualIndexFromQuery(request);
+
+        var master = MasterPlaylistRegex().Match(path);
+        if (master.Success && HttpMethods.IsGet(request.Method))
+        {
+            await HandleMasterPlaylistAsync(context, master.Groups["item"].Value, requested, originalMethod).ConfigureAwait(false);
+            return;
+        }
 
         var playbackInfo = PlaybackInfoRegex().Match(path);
         if (playbackInfo.Success && (HttpMethods.IsPost(request.Method) || HttpMethods.IsGet(request.Method)))
@@ -83,7 +97,7 @@ public partial class AppTrackMiddleware
             var itemId = details.Groups["item"].Value;
             await RewriteJsonAsync(context, root =>
             {
-                var added = AppTrackInjector.Inject(root, BuildOptions(itemId, null, null, null, null, false), out _);
+                var added = AppTrackInjector.Inject(root, BuildOptions(itemId, null, null, null, null, null, false), out _);
                 return added.Count > 0;
             }).ConfigureAwait(false);
             return;
@@ -127,10 +141,10 @@ public partial class AppTrackMiddleware
             }
         }
 
-        var format = ChooseFormat(body);
-        if (format is null)
+        var delivery = ChooseDelivery(body);
+        if (delivery is null)
         {
-            // This client cannot load external text subtitles.
+            // This client can load neither external nor HLS text subtitles.
             await _next(context).ConfigureAwait(false);
             return;
         }
@@ -146,19 +160,78 @@ public partial class AppTrackMiddleware
         InjectedTrack? selected = null;
         await RewriteJsonAsync(context, root =>
         {
-            var options = BuildOptions(itemId, format, GetAccessToken(request), requested, preferredKey, config.AutoSelectAppTrack);
+            var options = BuildOptions(itemId, delivery.Value.Format, delivery.Value.Method, GetAccessToken(request), requested, preferredKey, config.AutoSelectAppTrack);
             var added = AppTrackInjector.Inject(root, options, out selected);
             return added.Count > 0;
         }).ConfigureAwait(false);
 
-        if (selected is not null && Guid.TryParse(itemId, out var itemGuid))
+        if (selected is not null && delivery.Value.Method == "External" && Guid.TryParse(itemId, out var itemGuid))
         {
-            // The client will ask for the file right away; start translating now.
+            // The client will ask for the whole file right away; start translating now.
+            // (HLS clients load short segments instead, which are translated on demand.)
             _service.Prepare(itemGuid, selected.MediaSourceId, selected.SourceIndex, selected.Language);
         }
     }
 
-    private InjectOptions BuildOptions(string itemId, string? format, string? apiKey, int? requested, string? preferredKey, bool autoSelect)
+    private async Task HandleMasterPlaylistAsync(HttpContext context, string itemId, int? requested, string? originalMethod)
+    {
+        var request = context.Request;
+        var userAgent = request.Headers.UserAgent.ToString();
+        var appleCoreMedia = userAgent.Contains("AppleCoreMedia", StringComparison.OrdinalIgnoreCase)
+            || userAgent.Contains("AVPlayer", StringComparison.OrdinalIgnoreCase);
+        var hlsRequested = string.Equals(originalMethod, "Hls", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.Query["EnableSubtitlesInManifest"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+        var burnIn = string.Equals(originalMethod, "Encode", StringComparison.OrdinalIgnoreCase);
+
+        // Apple's player can only show subtitles that are part of the HLS stream.
+        if (burnIn || !(appleCoreMedia || hlsRequested) || !Guid.TryParse(itemId, out var itemGuid))
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
+        List<HlsRendition> renditions;
+        try
+        {
+            var item = _sourceService.GetItem(itemGuid);
+            var source = _sourceService.GetMediaSource(item, request.Query["MediaSourceId"].FirstOrDefault());
+            var token = GetAccessToken(request);
+            var container = request.Query["SegmentContainer"].FirstOrDefault();
+            var mpegts = string.Equals(container, "mp4", StringComparison.OrdinalIgnoreCase) ? 0 : AppTrackHls.DefaultTimestampMapMpegts;
+            renditions = _service.GetTracks(source)
+                .Select(t => new HlsRendition(
+                    t.Language.Target.DisplayName + " (KI)",
+                    t.Language.Target.Iso3 == "und" ? null : t.Language.Target.Key,
+                    $"{source.Id}/Subtitles/{t.Index}/subtitles.m3u8?SegmentLength=30"
+                        + (string.IsNullOrEmpty(token) ? string.Empty : "&ApiKey=" + Uri.EscapeDataString(token))
+                        + "&VttTimestampMapMpegts=" + mpegts.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    requested == t.Index))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Keine übersetzten Spuren für die HLS-Wiedergabe von {Item}", itemId);
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
+        if (renditions.Count == 0)
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
+        await RewriteAsync(
+            context,
+            contentType => contentType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase) || contentType.Contains("m3u", StringComparison.OrdinalIgnoreCase),
+            bytes =>
+            {
+                var result = AppTrackHls.InjectIntoMaster(Encoding.UTF8.GetString(bytes), renditions);
+                return result is null ? null : Encoding.UTF8.GetBytes(result);
+            }).ConfigureAwait(false);
+    }
+
+    private InjectOptions BuildOptions(string itemId, string? format, string? method, string? apiKey, int? requested, string? preferredKey, bool autoSelect)
         => new()
         {
             ItemId = itemId,
@@ -166,13 +239,24 @@ public partial class AppTrackMiddleware
             LanguageKey = _service.LanguageKey,
             LanguageName = _service.LanguageName,
             Format = format,
+            Method = method ?? "External",
             ApiKey = apiKey,
             RequestedIndex = requested,
             PreferredKey = preferredKey,
             AutoSelect = autoSelect
         };
 
-    private async Task RewriteJsonAsync(HttpContext context, Func<JsonNode, bool> mutate)
+    private Task RewriteJsonAsync(HttpContext context, Func<JsonNode, bool> mutate)
+        => RewriteAsync(
+            context,
+            contentType => contentType.Contains("json", StringComparison.OrdinalIgnoreCase),
+            bytes =>
+            {
+                var root = JsonNode.Parse(bytes);
+                return root is not null && mutate(root) ? Encoding.UTF8.GetBytes(root.ToJsonString()) : null;
+            });
+
+    private async Task RewriteAsync(HttpContext context, Func<string, bool> acceptsContentType, Func<byte[], byte[]?> transform)
     {
         // Ask for an uncompressed, complete response so it can be rewritten.
         context.Request.Headers.Remove("Accept-Encoding");
@@ -193,16 +277,16 @@ public partial class AppTrackMiddleware
 
         var bytes = buffer.ToArray();
         if (context.Response.StatusCode == StatusCodes.Status200OK
-            && (context.Response.ContentType ?? string.Empty).Contains("json", StringComparison.OrdinalIgnoreCase)
+            && acceptsContentType(context.Response.ContentType ?? string.Empty)
             && !context.Response.Headers.ContainsKey("Content-Encoding")
             && bytes.Length > 0)
         {
             try
             {
-                var root = JsonNode.Parse(bytes);
-                if (root is not null && mutate(root))
+                var changed = transform(bytes);
+                if (changed is not null)
                 {
-                    bytes = Encoding.UTF8.GetBytes(root.ToJsonString());
+                    bytes = changed;
                     context.Response.Headers.Remove("ETag");
                     context.Response.Headers.Remove("Last-Modified");
                 }
@@ -222,15 +306,16 @@ public partial class AppTrackMiddleware
     }
 
     /// <summary>
-    /// Picks srt or vtt from the client's device profile; null if it cannot load external text subtitles.
+    /// Picks how the client gets the track from its device profile: a whole srt/vtt file if it can load external
+    /// subtitles, otherwise HLS WebVTT segments; null if neither is possible.
     /// </summary>
     /// <param name="body">PlaybackInfo request body.</param>
-    /// <returns>Format or null.</returns>
-    internal static string? ChooseFormat(JsonObject? body)
+    /// <returns>Format and method, or null.</returns>
+    internal static (string Format, string Method)? ChooseDelivery(JsonObject? body)
     {
         if (body?["DeviceProfile"] is not JsonObject profile)
         {
-            return "srt";
+            return ("srt", "External");
         }
 
         if (profile["SubtitleProfiles"] is not JsonArray profiles)
@@ -238,26 +323,31 @@ public partial class AppTrackMiddleware
             return null;
         }
 
+        var hls = false;
         foreach (var entry in profiles.OfType<JsonObject>())
         {
             var method = entry["Method"]?.ToString();
-            if (!string.Equals(method, "External", StringComparison.OrdinalIgnoreCase) && method != "2")
+            var format = entry["Format"]?.ToString().ToLowerInvariant();
+            var isVtt = format is "vtt" or "webvtt";
+            if (string.Equals(method, "External", StringComparison.OrdinalIgnoreCase) || method == "2")
             {
-                continue;
-            }
+                if (format is "srt" or "subrip")
+                {
+                    return ("srt", "External");
+                }
 
-            switch (entry["Format"]?.ToString().ToLowerInvariant())
+                if (isVtt)
+                {
+                    return ("vtt", "External");
+                }
+            }
+            else if ((string.Equals(method, "Hls", StringComparison.OrdinalIgnoreCase) || method == "3") && isVtt)
             {
-                case "srt":
-                case "subrip":
-                    return "srt";
-                case "vtt":
-                case "webvtt":
-                    return "vtt";
+                hls = true;
             }
         }
 
-        return null;
+        return hls ? ("vtt", "Hls") : null;
     }
 
     private static int? StripVirtualIndexFromQuery(HttpRequest request)
@@ -363,8 +453,11 @@ public partial class AppTrackMiddleware
         };
     }
 
-    [GeneratedRegex(@"^(?<prefix>.*?)/Videos/(?<item>[0-9a-fA-F-]{32,36})/(?<ms>[^/]+)/Subtitles/(?<idx>\d+)(?:/\d+)?/Stream\.(?<fmt>[A-Za-z0-9]+)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?<prefix>.*?)/Videos/(?<item>[0-9a-fA-F-]{32,36})/(?<ms>[^/]+)/Subtitles/(?<idx>\d+)(?:(?:/\d+)?/Stream\.(?<fmt>[A-Za-z0-9]+)|/subtitles\.m3u8)$", RegexOptions.IgnoreCase)]
     private static partial Regex SubtitlePathRegex();
+
+    [GeneratedRegex(@"^(?<prefix>.*?)/Videos/(?<item>[0-9a-fA-F-]{32,36})/master\.m3u8$", RegexOptions.IgnoreCase)]
+    private static partial Regex MasterPlaylistRegex();
 
     [GeneratedRegex(@"^(?<prefix>.*?)/Items/(?<item>[0-9a-fA-F-]{32,36})/PlaybackInfo$", RegexOptions.IgnoreCase)]
     private static partial Regex PlaybackInfoRegex();

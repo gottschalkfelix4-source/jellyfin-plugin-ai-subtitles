@@ -44,6 +44,9 @@ public sealed class InjectOptions
     /// <summary>Gets the delivery format ("srt" or "vtt"); null only lists the tracks (item details).</summary>
     public string? Format { get; init; }
 
+    /// <summary>Gets the delivery method: "External" (whole file) or "Hls" (segmented, for AVPlayer).</summary>
+    public string Method { get; init; } = "External";
+
     /// <summary>Gets the access token appended to the delivery URL.</summary>
     public string? ApiKey { get; init; }
 
@@ -239,13 +242,16 @@ public static class AppTrackInjector
 
             if (options.Format is not null)
             {
-                var url = $"/Videos/{options.ItemId}/{sourceId}/Subtitles/{index}/0/Stream.{options.Format}";
+                var hls = string.Equals(options.Method, "Hls", StringComparison.OrdinalIgnoreCase);
+                var url = hls
+                    ? $"/Videos/{options.ItemId}/{sourceId}/Subtitles/{index}/subtitles.m3u8?SegmentLength=30"
+                    : $"/Videos/{options.ItemId}/{sourceId}/Subtitles/{index}/0/Stream.{options.Format}";
                 if (!string.IsNullOrEmpty(options.ApiKey))
                 {
-                    url += "?ApiKey=" + Uri.EscapeDataString(options.ApiKey);
+                    url += (hls ? "&" : "?") + "ApiKey=" + Uri.EscapeDataString(options.ApiKey);
                 }
 
-                node[n("DeliveryMethod")] = "External";
+                node[n("DeliveryMethod")] = hls ? "Hls" : "External";
                 node[n("DeliveryUrl")] = url;
             }
 

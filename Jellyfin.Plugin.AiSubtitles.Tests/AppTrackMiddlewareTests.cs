@@ -82,6 +82,7 @@ public class AppTrackMiddlewareTests
                 seenBody = new StreamReader(req.Body).ReadToEnd();
             }),
             CreateService(),
+            null!,
             NullLogger<AppTrackMiddleware>.Instance);
 
         var context = Context(
@@ -111,6 +112,7 @@ public class AppTrackMiddlewareTests
         var middleware = new AppTrackMiddleware(
             ctx => { seenPath = ctx.Request.Path.Value; return Task.CompletedTask; },
             CreateService(),
+            null!,
             NullLogger<AppTrackMiddleware>.Instance);
 
         await middleware.InvokeAsync(Context("GET", $"/jellyfin/Videos/{ItemId}/ms1/Subtitles/{virtualIndex}/0/Stream.srt", "?ApiKey=secret"));
@@ -123,7 +125,7 @@ public class AppTrackMiddlewareTests
     [Fact]
     public async Task ItemDetailsListTrackForAppsAndBrowser()
     {
-        var middleware = new AppTrackMiddleware(Respond(PlaybackInfoJson), CreateService(), NullLogger<AppTrackMiddleware>.Instance);
+        var middleware = new AppTrackMiddleware(Respond(PlaybackInfoJson), CreateService(), null!, NullLogger<AppTrackMiddleware>.Instance);
 
         var app = Context("GET", $"/Users/{ItemId}/Items/{ItemId}");
         await middleware.InvokeAsync(app);

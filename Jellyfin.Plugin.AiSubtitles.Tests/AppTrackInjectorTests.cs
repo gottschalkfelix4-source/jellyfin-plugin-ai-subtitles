@@ -166,13 +166,35 @@ public class AppTrackInjectorTests
     }
 
     [Theory]
-    [InlineData("""{"DeviceProfile":{"SubtitleProfiles":[{"Format":"ass","Method":"Embed"},{"Format":"vtt","Method":"External"}]}}""", "vtt")]
-    [InlineData("""{"deviceProfile":{"subtitleProfiles":[{"format":"subrip","method":"External"}]}}""", "srt")]
+    [InlineData("""{"DeviceProfile":{"SubtitleProfiles":[{"Format":"ass","Method":"Embed"},{"Format":"vtt","Method":"External"}]}}""", "vtt/External")]
+    [InlineData("""{"deviceProfile":{"subtitleProfiles":[{"format":"subrip","method":"External"}]}}""", "srt/External")]
     [InlineData("""{"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"Encode"}]}}""", null)]
-    [InlineData("""{"UserId":"x"}""", "srt")]
-    public void ChoosesFormatFromDeviceProfile(string body, string? expected)
+    [InlineData("""{"DeviceProfile":{"SubtitleProfiles":[{"Format":"vtt","Method":"Hls"},{"Format":"srt","Method":"Encode"}]}}""", "vtt/Hls")]
+    [InlineData("""{"DeviceProfile":{"SubtitleProfiles":[{"Format":"vtt","Method":"Hls"},{"Format":"vtt","Method":"External"}]}}""", "vtt/External")]
+    [InlineData("""{"UserId":"x"}""", "srt/External")]
+    public void ChoosesDeliveryFromDeviceProfile(string body, string? expected)
     {
         var node = JsonNode.Parse(body, new JsonNodeOptions { PropertyNameCaseInsensitive = true }) as JsonObject;
-        Assert.Equal(expected, AppTrackMiddleware.ChooseFormat(node));
+        var result = AppTrackMiddleware.ChooseDelivery(node);
+        Assert.Equal(expected, result is null ? null : result.Value.Format + "/" + result.Value.Method);
+    }
+
+    [Fact]
+    public void HlsTrackPointsToSubtitlePlaylist()
+    {
+        var root = JsonNode.Parse(PlaybackInfo)!;
+        var options = new InjectOptions
+        {
+            ItemId = ItemId,
+            Languages = [German],
+            LanguageKey = Key,
+            Format = "vtt",
+            Method = "Hls",
+            ApiKey = "abc"
+        };
+        var track = Assert.Single(AppTrackInjector.Inject(root, options, out _));
+        var stream = root["MediaSources"]![0]!["MediaStreams"]!.AsArray().Last()!;
+        Assert.Equal("Hls", stream["DeliveryMethod"]!.GetValue<string>());
+        Assert.Equal($"/Videos/{ItemId}/ms1/Subtitles/{track.Index}/subtitles.m3u8?SegmentLength=30&ApiKey=abc", stream["DeliveryUrl"]!.GetValue<string>());
     }
 }

@@ -11,6 +11,7 @@ using Jellyfin.Plugin.AiSubtitles.Translation;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Globalization;
 using Microsoft.Extensions.Logging;
 
@@ -190,7 +191,41 @@ public class AppTrackService
         }
     }
 
-    private async Task<List<SubtitleCue>> TranslateSafeAsync(List<SubtitleCue> cues, BatchInfo batch, TargetLanguage language, string name)
+    /// <summary>
+    /// Lists the translated tracks offered for a media source.
+    /// </summary>
+    /// <param name="source">Media source.</param>
+    /// <returns>Virtual index, original stream index and language of each track.</returns>
+    public List<(int Index, int SourceIndex, AppLanguage Language)> GetTracks(MediaSourceInfo source)
+    {
+        var streams = SubtitleSourceService.GetTextStreams(source);
+        var result = new List<(int, int, AppLanguage)>();
+        foreach (var language in GetLanguages())
+        {
+            if (AppTrackInjector.HasNativeTrack(streams, language.Target.Key, LanguageKey))
+            {
+                continue;
+            }
+
+            var pick = AppTrackInjector.PickSource(streams, language.Target.Key, LanguageKey);
+            if (pick is not null)
+            {
+                result.Add((AppTrackInjector.Encode(language.Position, pick.Index), pick.Index, language));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Translates one batch; on failure the original lines are returned.
+    /// </summary>
+    /// <param name="cues">All cues.</param>
+    /// <param name="batch">Batch.</param>
+    /// <param name="language">Target language.</param>
+    /// <param name="name">Item name for the log.</param>
+    /// <returns>Cues of the batch.</returns>
+    public async Task<List<SubtitleCue>> TranslateSafeAsync(List<SubtitleCue> cues, BatchInfo batch, TargetLanguage language, string name)
     {
         try
         {

@@ -35,7 +35,8 @@ Voraussetzung: **Jellyfin 12.4** oder neuer.
 - Übersetzt wird erst, wenn jemand die Spur auswählt. Fertige Übersetzungen kommen danach sofort aus dem Cache – auch für andere Benutzer und Geräte.
 - **Automatische Auswahl:** Würde Jellyfin Untertitel in einer anderen Sprache einschalten als der bevorzugten Untertitelsprache des Benutzers, wird stattdessen die Übersetzung gewählt.
 - **Serien:** Ist eine Folge fertig, wird die nächste Folge im Hintergrund übersetzt, damit ihre Untertitel beim Weiterschauen sofort da sind.
-- **Erstes Abspielen:** Apps laden eine Untertitelspur immer als ganze Datei. Beim ersten Mal erscheinen die Untertitel deshalb erst, wenn der ganze Titel übersetzt ist – bei einem Spielfilm je nach Modell etwa 1–5 Minuten (schneller mit `claude-haiku-5-5` oder mehr *parallelen KI-Anfragen*). Danach ist die Spur sofort da.
+- **Apple-Geräte** (iPhone, iPad, Apple TV, Safari) bekommen die Spur als Teil des HLS-Streams in 30-Sekunden-Abschnitten. Übersetzt wird ab der aktuellen Stelle und ein paar Minuten im Voraus, die ersten Untertitel erscheinen also nach kurzer Zeit.
+- **Erstes Abspielen auf anderen Geräten:** Die übrigen Apps laden eine Untertitelspur als ganze Datei. Beim ersten Mal erscheinen die Untertitel dort deshalb erst, wenn der ganze Titel übersetzt ist – bei einem Spielfilm je nach Modell etwa 1–5 Minuten (schneller mit `claude-haiku-5-5` oder mehr *parallelen KI-Anfragen*). Danach ist die Spur sofort da.
 
 **In „Untertitel suchen“** (Dialog in der Titelansicht, in allen Clients mit Untertitelsuche) erscheint für jede vorhandene Text-Spur ein Eintrag „KI-Übersetzung … → Sprache“. Beim Herunterladen wird komplett übersetzt und gespeichert. Der automatische Untertitel-Download des Servers wird bewusst ignoriert, damit nicht unbemerkt ganze Bibliotheken übersetzt werden.
 
@@ -83,10 +84,13 @@ Grobe Kosten für einen Spielfilm mit ca. 1.500 Untertitelzeilen: mit `claude-op
 
 ## Welche Clients können was?
 
-| Client | Spur „Sprache (KI)“ im Untertitelmenü |
+| Client | Wie die Spur geliefert wird |
 |---|---|
-| Browser (jellyfin-web), Jellyfin Media Player, Android-App, LG webOS | ✔ |
-| Samsung Tizen, Android TV / Fire TV, Swiftfin (iPhone, iPad, Apple TV), Roku, Kodi u. a. | ✔ |
+| Browser (jellyfin-web), Jellyfin Media Player, Android-App, LG webOS, Samsung Tizen | ganze Spur (Jellyfins JSON-Format bzw. WebVTT) |
+| Android TV / Fire TV, Roku, Kodi u. a. | ganze Spur (SRT oder WebVTT, je nach Geräteprofil) |
+| iPhone, iPad, Apple TV, Safari (Apples Player) | HLS-Untertitel in 30-s-Abschnitten, live ab der aktuellen Stelle |
+
+Apples Player kann keine externen Untertiteldateien laden, nur Untertitel aus dem HLS-Stream. Das Plugin trägt die Spur deshalb in die `master.m3u8` ein, sobald ein Apple-Player den Stream abruft. Spielt ein Apple-Gerät eine Datei direkt ab (ohne HLS), kann es die Spur nicht zeigen.
 
 Apps, die keine externen Text-Untertitel laden können (sie melden das in ihrem Geräteprofil), bekommen die Spur nicht angezeigt.
 
@@ -102,7 +106,8 @@ Plugin ── ISubtitleEncoder (Jellyfin) → Original als SRT → Abschnitte à
 ```
 
 - Gleiche Abschnitte, die mehrere Zuschauer zugleich anfordern, werden nur einmal übersetzt.
-- Eine Middleware ergänzt die Antworten von `/Items/{id}/PlaybackInfo` und `/Items/{id}` um zusätzliche Untertitelspuren mit eigenen Indizes ab 100000 (externe SRT- oder WebVTT-Datei, passend zum Geräteprofil der App). Fragt eine App `/Videos/{id}/{quelle}/Subtitles/{index}/…/Stream.srt` für einen solchen Index an, liefert das Plugin die Übersetzung: abschnittsweise in Reihenfolge, mit Leerzeilen als Keep-alive, damit Player mit kurzem Lese-Timeout nicht abbrechen. Die Übersetzung läuft weiter, auch wenn die App die Verbindung trennt. Jellyfin selbst bekommt den virtuellen Index nie zu sehen (er wird in Anfragen durch „keine Untertitel“ ersetzt), damit der Server nicht versucht, eine nicht vorhandene Spur einzubrennen.
+- Eine Middleware ergänzt die Antworten von `/Items/{id}/PlaybackInfo` und `/Items/{id}` um zusätzliche Untertitelspuren mit eigenen Indizes ab 100000 (externe SRT- oder WebVTT-Datei, passend zum Geräteprofil der App). Fragt eine App `/Videos/{id}/{quelle}/Subtitles/{index}/…/Stream.srt` (bzw. `.vtt`, oder `.js` beim Web-Player) für einen solchen Index an, liefert das Plugin die Übersetzung: abschnittsweise in Reihenfolge, mit Leerzeilen als Keep-alive, damit Player mit kurzem Lese-Timeout nicht abbrechen. Die Übersetzung läuft weiter, auch wenn die App die Verbindung trennt. Jellyfin selbst bekommt den virtuellen Index nie zu sehen (er wird in Anfragen durch „keine Untertitel“ ersetzt), damit der Server nicht versucht, eine nicht vorhandene Spur einzubrennen.
+- Für Apples Player ergänzt die Middleware die `master.m3u8` um `#EXT-X-MEDIA:TYPE=SUBTITLES`-Einträge. Deren Playlist (`subtitles.m3u8`) und WebVTT-Abschnitte (`stream.vtt?StartPositionTicks=…&EndPositionTicks=…`, mit `X-TIMESTAMP-MAP`) beantwortet das Plugin im selben Format wie Jellyfin. Pro Abschnitt werden nur die betroffenen Übersetzungsblöcke übersetzt, die nächsten drei im Voraus.
 
 ## API
 
@@ -110,7 +115,8 @@ Plugin ── ISubtitleEncoder (Jellyfin) → Original als SRT → Abschnitte à
 |---|---|---|
 | GET | `/AiSubtitles/Streams/{itemId}?mediaSourceId=` | übersetzbare Spuren |
 | GET | `/AiSubtitles/File/{itemId}?…&lang=&format=srt\|vtt` | komplette Übersetzung als Datei |
-| GET | `/AiSubtitles/AppTrack/{itemId}/{mediaSourceId}/{index}/Stream.srt\|vtt` | Untertitelspur (wird über `/Videos/…/Subtitles/{index}/…` erreicht) |
+| GET | `/AiSubtitles/AppTrack/{itemId}/{mediaSourceId}/{index}/Stream.srt\|vtt\|js` | Untertitelspur (wird über `/Videos/…/Subtitles/{index}/…` erreicht) |
+| GET | `/AiSubtitles/AppTrack/{itemId}/{mediaSourceId}/{index}/subtitles.m3u8` | HLS-Untertitel-Playlist für Apples Player |
 | POST | `/AiSubtitles/Save/{itemId}?…&lang=` | komplett übersetzen und als Untertitel speichern |
 | POST | `/AiSubtitles/Test?lang=` | Verbindungstest (Admin) |
 | GET/POST | `/AiSubtitles/CacheInfo`, `/AiSubtitles/ClearCache` | Cache (Admin) |
