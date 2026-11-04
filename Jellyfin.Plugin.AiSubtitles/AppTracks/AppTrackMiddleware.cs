@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.AiSubtitles.Subtitles;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.Extensions.Logging;
@@ -26,7 +25,6 @@ public partial class AppTrackMiddleware
 
     private readonly RequestDelegate _next;
     private readonly AppTrackService _service;
-    private readonly SubtitleSourceService _sourceService;
     private readonly ILogger<AppTrackMiddleware> _logger;
 
     /// <summary>
@@ -34,13 +32,11 @@ public partial class AppTrackMiddleware
     /// </summary>
     /// <param name="next">Next delegate.</param>
     /// <param name="service">Track service.</param>
-    /// <param name="sourceService">Subtitle source service.</param>
     /// <param name="logger">Logger.</param>
-    public AppTrackMiddleware(RequestDelegate next, AppTrackService service, SubtitleSourceService sourceService, ILogger<AppTrackMiddleware> logger)
+    public AppTrackMiddleware(RequestDelegate next, AppTrackService service, ILogger<AppTrackMiddleware> logger)
     {
         _next = next;
         _service = service;
-        _sourceService = sourceService;
         _logger = logger;
     }
 
@@ -63,7 +59,10 @@ public partial class AppTrackMiddleware
 
         // 1. Subtitle file or HLS playlist of a translated track -> plugin endpoint.
         var subtitle = SubtitlePathRegex().Match(path);
-        if (subtitle.Success && int.TryParse(subtitle.Groups["idx"].Value, out var subtitleIndex) && AppTrackInjector.IsVirtual(subtitleIndex))
+        if (subtitle.Success
+            && int.TryParse(subtitle.Groups["idx"].Value, out var subtitleIndex)
+            && Guid.TryParse(subtitle.Groups["item"].Value, out var subtitleItem)
+            && _service.Resolve(subtitleItem, subtitle.Groups["ms"].Value, subtitleIndex) is not null)
         {
             var file = subtitle.Groups["fmt"].Success ? "Stream." + subtitle.Groups["fmt"].Value : "subtitles.m3u8";
             request.Path = new PathString(subtitle.Groups["prefix"].Value
@@ -75,7 +74,7 @@ public partial class AppTrackMiddleware
         var originalMethod = request.Query["SubtitleMethod"].FirstOrDefault();
 
         // 2. Jellyfin itself must never see a virtual index (it would try to burn in a stream that does not exist).
-        var requested = StripVirtualIndexFromQuery(request);
+        var requested = StripVirtualIndexFromQuery(request, path);
 
         var master = MasterPlaylistRegex().Match(path);
         if (master.Success && HttpMethods.IsGet(request.Method))
@@ -124,7 +123,8 @@ public partial class AppTrackMiddleware
                 if (body is not null && AsInt(body["SubtitleStreamIndex"]) is int bodyIndex)
                 {
                     requested = bodyIndex;
-                    if (AppTrackInjector.IsVirtual(bodyIndex))
+                    var sourceId = AsString(body["MediaSourceId"]) ?? request.Query["MediaSourceId"].FirstOrDefault();
+                    if (Guid.TryParse(itemId, out var bodyItem) && _service.Resolve(bodyItem, sourceId, bodyIndex) is not null)
                     {
                         body["SubtitleStreamIndex"] = -1;
                         var bytes = Encoding.UTF8.GetBytes(body.ToJsonString());
@@ -190,36 +190,25 @@ public partial class AppTrackMiddleware
             return;
         }
 
-        List<HlsRendition> renditions;
-        try
+        var layout = _service.GetLayout(itemGuid, request.Query["MediaSourceId"].FirstOrDefault());
+        if (layout is null)
         {
-            var item = _sourceService.GetItem(itemGuid);
-            var source = _sourceService.GetMediaSource(item, request.Query["MediaSourceId"].FirstOrDefault());
-            var token = GetAccessToken(request);
-            var container = request.Query["SegmentContainer"].FirstOrDefault();
-            var mpegts = string.Equals(container, "mp4", StringComparison.OrdinalIgnoreCase) ? 0 : AppTrackHls.DefaultTimestampMapMpegts;
-            renditions = _service.GetTracks(source)
-                .Select(t => new HlsRendition(
-                    t.Language.Target.DisplayName + " (KI)",
-                    t.Language.Target.Iso3 == "und" ? null : t.Language.Target.Key,
-                    $"{source.Id}/Subtitles/{t.Index}/subtitles.m3u8?SegmentLength=30"
-                        + (string.IsNullOrEmpty(token) ? string.Empty : "&ApiKey=" + Uri.EscapeDataString(token))
-                        + "&VttTimestampMapMpegts=" + mpegts.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    requested == t.Index))
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Keine übersetzten Spuren für die HLS-Wiedergabe von {Item}", itemId);
             await _next(context).ConfigureAwait(false);
             return;
         }
 
-        if (renditions.Count == 0)
-        {
-            await _next(context).ConfigureAwait(false);
-            return;
-        }
+        var token = GetAccessToken(request);
+        var container = request.Query["SegmentContainer"].FirstOrDefault();
+        var mpegts = string.Equals(container, "mp4", StringComparison.OrdinalIgnoreCase) ? 0 : AppTrackHls.DefaultTimestampMapMpegts;
+        var renditions = layout.Tracks
+            .Select(t => new HlsRendition(
+                t.Language.Target.DisplayName + " (KI)",
+                t.Language.Target.Iso3 == "und" ? null : t.Language.Target.Key,
+                $"{layout.MediaSourceId}/Subtitles/{t.Index}/subtitles.m3u8?SegmentLength=30"
+                    + (string.IsNullOrEmpty(token) ? string.Empty : "&ApiKey=" + Uri.EscapeDataString(token))
+                    + "&VttTimestampMapMpegts=" + mpegts.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                requested == t.Index))
+            .ToList();
 
         await RewriteAsync(
             context,
@@ -350,12 +339,16 @@ public partial class AppTrackMiddleware
         return hls ? ("vtt", "Hls") : null;
     }
 
-    private static int? StripVirtualIndexFromQuery(HttpRequest request)
+    private int? StripVirtualIndexFromQuery(HttpRequest request, string path)
     {
-        if (!request.QueryString.HasValue)
+        if (!request.QueryString.HasValue || !request.Query.ContainsKey("SubtitleStreamIndex"))
         {
             return null;
         }
+
+        var itemMatch = ItemInPathRegex().Match(path);
+        Guid.TryParse(itemMatch.Success ? itemMatch.Groups["item"].Value : null, out var itemId);
+        var sourceId = request.Query["MediaSourceId"].FirstOrDefault();
 
         int? requested = null;
         var changed = false;
@@ -365,7 +358,7 @@ public partial class AppTrackMiddleware
             if (key.Equals("SubtitleStreamIndex", StringComparison.OrdinalIgnoreCase) && int.TryParse(values.FirstOrDefault(), out var index))
             {
                 requested = index;
-                if (AppTrackInjector.IsVirtual(index))
+                if (itemId != Guid.Empty && _service.Resolve(itemId, sourceId, index) is not null)
                 {
                     builder.Add(key, "-1");
                     changed = true;
@@ -458,6 +451,9 @@ public partial class AppTrackMiddleware
 
     [GeneratedRegex(@"^(?<prefix>.*?)/Videos/(?<item>[0-9a-fA-F-]{32,36})/master\.m3u8$", RegexOptions.IgnoreCase)]
     private static partial Regex MasterPlaylistRegex();
+
+    [GeneratedRegex(@"/(?:Videos|Items)/(?<item>[0-9a-fA-F-]{32,36})(?:/|$)", RegexOptions.IgnoreCase)]
+    private static partial Regex ItemInPathRegex();
 
     [GeneratedRegex(@"^(?<prefix>.*?)/Items/(?<item>[0-9a-fA-F-]{32,36})/PlaybackInfo$", RegexOptions.IgnoreCase)]
     private static partial Regex PlaybackInfoRegex();

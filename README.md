@@ -97,7 +97,7 @@ Apps, die keine externen Text-Untertitel laden können (sie melden das in ihrem 
 ## Funktionsweise
 
 ```
-App ── PlaybackInfo ──────────► Server-Antwort + Spur „Deutsch (KI)“ (Index ≥ 100000)
+App ── PlaybackInfo ──────────► Server-Antwort + Spur „Deutsch (KI)“ (nächster freier Index)
     ── Spur gewählt ──────────► GET /Videos/{id}/{quelle}/Subtitles/{index}/0/Stream.srt
                                       │ (vom Plugin beantwortet)
 Plugin ── ISubtitleEncoder (Jellyfin) → Original als SRT → Abschnitte à 40 Zeilen
@@ -106,7 +106,7 @@ Plugin ── ISubtitleEncoder (Jellyfin) → Original als SRT → Abschnitte à
 ```
 
 - Gleiche Abschnitte, die mehrere Zuschauer zugleich anfordern, werden nur einmal übersetzt.
-- Eine Middleware ergänzt die Antworten von `/Items/{id}/PlaybackInfo` und `/Items/{id}` um zusätzliche Untertitelspuren mit eigenen Indizes ab 100000 (externe SRT- oder WebVTT-Datei, passend zum Geräteprofil der App). Fragt eine App `/Videos/{id}/{quelle}/Subtitles/{index}/…/Stream.srt` (bzw. `.vtt`, oder `.js` beim Web-Player) für einen solchen Index an, liefert das Plugin die Übersetzung: abschnittsweise in Reihenfolge, mit Leerzeilen als Keep-alive, damit Player mit kurzem Lese-Timeout nicht abbrechen. Die Übersetzung läuft weiter, auch wenn die App die Verbindung trennt. Jellyfin selbst bekommt den virtuellen Index nie zu sehen (er wird in Anfragen durch „keine Untertitel“ ersetzt), damit der Server nicht versucht, eine nicht vorhandene Spur einzubrennen.
+- Eine Middleware ergänzt die Antworten von `/Items/{id}/PlaybackInfo` und `/Items/{id}` um zusätzliche Untertitelspuren. Sie bekommen die nächsten freien Indizes direkt nach den vorhandenen Spuren, damit Index und Position in der Liste übereinstimmen – der Web-Player sucht eine vorab gewählte Spur über ihre Position (externe SRT- oder WebVTT-Datei, passend zum Geräteprofil der App). Fragt eine App `/Videos/{id}/{quelle}/Subtitles/{index}/…/Stream.srt` (bzw. `.vtt`, oder `.js` beim Web-Player) für einen solchen Index an, liefert das Plugin die Übersetzung: abschnittsweise in Reihenfolge, mit Leerzeilen als Keep-alive, damit Player mit kurzem Lese-Timeout nicht abbrechen. Die Übersetzung läuft weiter, auch wenn die App die Verbindung trennt. Welche Indizes zum Plugin gehören, ermittelt die Middleware pro Titel. Jellyfin selbst bekommt diese Indizes nie zu sehen (er wird in Anfragen durch „keine Untertitel“ ersetzt), damit der Server nicht versucht, eine nicht vorhandene Spur einzubrennen.
 - Für Apples Player ergänzt die Middleware die `master.m3u8` um `#EXT-X-MEDIA:TYPE=SUBTITLES`-Einträge. Deren Playlist (`subtitles.m3u8`) und WebVTT-Abschnitte (`stream.vtt?StartPositionTicks=…&EndPositionTicks=…`, mit `X-TIMESTAMP-MAP`) beantwortet das Plugin im selben Format wie Jellyfin. Pro Abschnitt werden nur die betroffenen Übersetzungsblöcke übersetzt, die nächsten drei im Voraus.
 
 ## API

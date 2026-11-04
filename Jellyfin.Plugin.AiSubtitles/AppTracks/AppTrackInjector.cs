@@ -67,37 +67,18 @@ public sealed class InjectOptions
 public static class AppTrackInjector
 {
     /// <summary>
-    /// Virtual stream indexes start here; real streams never get that high.
+    /// Property that marks the added streams in the JSON (clients ignore unknown properties).
     /// </summary>
-    public const int VirtualBase = 100000;
-
-    private const int MaxSourceIndex = 1000;
+    public const string Marker = "AiTranslated";
 
     /// <summary>
-    /// Gets whether an index belongs to a translated track.
+    /// First stream index after the existing streams. The translated tracks are numbered from here, so a track's
+    /// index equals its position in the stream list – the web player looks up a preselected subtitle by position.
     /// </summary>
-    /// <param name="index">Stream index.</param>
-    /// <returns>True for virtual indexes.</returns>
-    public static bool IsVirtual(int index) => index >= VirtualBase;
-
-    /// <summary>
-    /// Builds the virtual index of a track.
-    /// </summary>
-    /// <param name="languagePosition">Position of the language.</param>
-    /// <param name="sourceIndex">Index of the original stream.</param>
-    /// <returns>Virtual index.</returns>
-    public static int Encode(int languagePosition, int sourceIndex) => VirtualBase + (languagePosition * MaxSourceIndex) + sourceIndex;
-
-    /// <summary>
-    /// Splits a virtual index.
-    /// </summary>
-    /// <param name="index">Virtual index.</param>
-    /// <returns>Language position and original stream index.</returns>
-    public static (int LanguagePosition, int SourceIndex) Decode(int index)
-    {
-        var value = index - VirtualBase;
-        return (value / MaxSourceIndex, value % MaxSourceIndex);
-    }
+    /// <param name="indexes">Indexes of the existing streams.</param>
+    /// <returns>First free index.</returns>
+    public static int FirstFreeIndex(IReadOnlyCollection<int> indexes)
+        => indexes.Count == 0 ? 0 : Math.Max(indexes.Count, indexes.Max() + 1);
 
     /// <summary>
     /// Chooses the original track to translate from.
@@ -110,7 +91,7 @@ public static class AppTrackInjector
     public static SourceStream? PickSource(IEnumerable<SourceStream> streams, string targetKey, Func<string?, string?> languageKey, string? preferredSourceKey = null)
     {
         return streams
-            .Where(s => !s.IsForced && s.Index >= 0 && s.Index < MaxSourceIndex)
+            .Where(s => !s.IsForced && s.Index >= 0)
             .Where(s => !string.Equals(languageKey(s.Language), targetKey, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(s => preferredSourceKey is not null && string.Equals(languageKey(s.Language), preferredSourceKey, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(s => string.Equals(languageKey(s.Language), "en", StringComparison.OrdinalIgnoreCase))
@@ -188,11 +169,13 @@ public static class AppTrackInjector
     private static List<InjectedTrack> InjectInto(JsonArray streams, string sourceId, InjectOptions options, Func<string, string> n)
     {
         var result = new List<InjectedTrack>();
-        var parsed = streams.OfType<JsonObject>().Select(s => (Node: s, Index: AsInt(s[n("Index")]))).ToList();
-        if (parsed.Any(p => p.Index is int i && IsVirtual(i)))
+        if (streams.OfType<JsonObject>().Any(s => s.ContainsKey(Marker)))
         {
             return result; // already done
         }
+
+        var parsed = streams.OfType<JsonObject>().Select(s => (Node: s, Index: AsInt(s[n("Index")]))).ToList();
+        var nextIndex = FirstFreeIndex(parsed.Where(p => p.Index is not null).Select(p => p.Index!.Value).ToList());
 
         var text = parsed
             .Where(p => p.Index is not null
@@ -220,7 +203,7 @@ public static class AppTrackInjector
                 continue;
             }
 
-            var index = Encode(language.Position, source.Index);
+            var index = nextIndex++;
             var sourceName = options.LanguageName?.Invoke(source.Language) ?? source.Language ?? "Original";
             var title = language.Target.DisplayName + " (KI)";
             var node = new JsonObject
@@ -237,7 +220,8 @@ public static class AppTrackInjector
                 [n("IsExternal")] = true,
                 [n("IsTextSubtitleStream")] = true,
                 [n("SupportsExternalStream")] = true,
-                [n("IsExternalUrl")] = false
+                [n("IsExternalUrl")] = false,
+                [Marker] = true
             };
 
             if (options.Format is not null)
@@ -270,10 +254,9 @@ public static class AppTrackInjector
         }
 
         InjectedTrack? choice = null;
-        if (options.RequestedIndex is int requested && IsVirtual(requested))
+        if (options.RequestedIndex is int requested && tracks.Any(t => t.Index == requested))
         {
-            choice = tracks.FirstOrDefault(t => t.Index == requested)
-                ?? tracks.FirstOrDefault(t => t.Language.Position == Decode(requested).LanguagePosition);
+            choice = tracks.First(t => t.Index == requested);
         }
         else if (options.AutoSelect && options.RequestedIndex is null && options.PreferredKey is not null
             && AsInt(source[n("DefaultSubtitleStreamIndex")]) is int current && current >= 0)

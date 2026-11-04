@@ -19,6 +19,8 @@ public class AppTrackMiddlewareTests
     private const string PlaybackInfoJson = """
         {"MediaSources":[{"Id":"ms1","DefaultSubtitleStreamIndex":-1,"MediaStreams":[
           {"Type":"Video","Index":0},
+          {"Type":"Audio","Index":1},
+          {"Type":"Audio","Index":2},
           {"Type":"Subtitle","Index":3,"Language":"eng","IsTextSubtitleStream":true}
         ]}]}
         """;
@@ -28,14 +30,29 @@ public class AppTrackMiddlewareTests
         ConfigOverride.Set(new PluginConfiguration { AppTrackLanguages = "de" });
     }
 
-    private static AppTrackService CreateService()
-        => new(
-            null!,
-            null!,
-            NullLocalization.Create(),
-            DispatchProxy.Create<ILibraryManager, NullLocalization>(),
-            DispatchProxy.Create<IUserManager, NullLocalization>(),
-            NullLogger<AppTrackService>.Instance);
+    private static AppTrackService CreateService() => new FakeService();
+
+    /// <summary>
+    /// Item with one English text subtitle (index 3) and streams 0..3, so the German track gets index 4.
+    /// </summary>
+    private sealed class FakeService : AppTrackService
+    {
+        public FakeService()
+            : base(
+                null!,
+                null!,
+                NullLocalization.Create(),
+                DispatchProxy.Create<ILibraryManager, NullLocalization>(),
+                DispatchProxy.Create<IUserManager, NullLocalization>(),
+                NullLogger<AppTrackService>.Instance)
+        {
+        }
+
+        public override TrackLayout? GetLayout(System.Guid itemId, string? mediaSourceId)
+            => itemId == System.Guid.Parse(ItemId)
+                ? new TrackLayout(null!, "ms1", [new AppTrack(4, 3, GetLanguages()[0])])
+                : null;
+    }
 
     private static DefaultHttpContext Context(string method, string path, string query = "", string? body = null, string client = "Android TV")
     {
@@ -71,7 +88,7 @@ public class AppTrackMiddlewareTests
     [Fact]
     public async Task PlaybackInfoHidesVirtualIndexFromJellyfinAndAddsTrack()
     {
-        var virtualIndex = AppTrackInjector.Encode(0, 3);
+        var virtualIndex = 4;
         string? seenBody = null;
         string? seenQuery = null;
 
@@ -82,7 +99,6 @@ public class AppTrackMiddlewareTests
                 seenBody = new StreamReader(req.Body).ReadToEnd();
             }),
             CreateService(),
-            null!,
             NullLogger<AppTrackMiddleware>.Instance);
 
         var context = Context(
@@ -99,7 +115,7 @@ public class AppTrackMiddlewareTests
         var response = JsonNode.Parse(await ReadResponse(context))!;
         var source = response["MediaSources"]![0]!;
         Assert.Equal(virtualIndex, source["DefaultSubtitleStreamIndex"]!.GetValue<int>());
-        var track = source["MediaStreams"]!.AsArray()[2]!;
+        var track = source["MediaStreams"]!.AsArray()[virtualIndex]!;
         Assert.Equal($"/Videos/{ItemId}/ms1/Subtitles/{virtualIndex}/0/Stream.vtt?ApiKey=secret", track["DeliveryUrl"]!.GetValue<string>());
         Assert.Equal(context.Response.ContentLength, context.Response.Body.Length);
     }
@@ -107,12 +123,11 @@ public class AppTrackMiddlewareTests
     [Fact]
     public async Task SubtitleRequestForVirtualIndexGoesToPlugin()
     {
-        var virtualIndex = AppTrackInjector.Encode(0, 3);
+        var virtualIndex = 4;
         string? seenPath = null;
         var middleware = new AppTrackMiddleware(
             ctx => { seenPath = ctx.Request.Path.Value; return Task.CompletedTask; },
             CreateService(),
-            null!,
             NullLogger<AppTrackMiddleware>.Instance);
 
         await middleware.InvokeAsync(Context("GET", $"/jellyfin/Videos/{ItemId}/ms1/Subtitles/{virtualIndex}/0/Stream.srt", "?ApiKey=secret"));
@@ -125,14 +140,14 @@ public class AppTrackMiddlewareTests
     [Fact]
     public async Task ItemDetailsListTrackForAppsAndBrowser()
     {
-        var middleware = new AppTrackMiddleware(Respond(PlaybackInfoJson), CreateService(), null!, NullLogger<AppTrackMiddleware>.Instance);
+        var middleware = new AppTrackMiddleware(Respond(PlaybackInfoJson), CreateService(), NullLogger<AppTrackMiddleware>.Instance);
 
         var app = Context("GET", $"/Users/{ItemId}/Items/{ItemId}");
         await middleware.InvokeAsync(app);
-        Assert.Equal(3, JsonNode.Parse(await ReadResponse(app))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
+        Assert.Equal(5, JsonNode.Parse(await ReadResponse(app))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
 
         var browser = Context("GET", $"/Items/{ItemId}", client: "Jellyfin Web");
         await middleware.InvokeAsync(browser);
-        Assert.Equal(3, JsonNode.Parse(await ReadResponse(browser))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
+        Assert.Equal(5, JsonNode.Parse(await ReadResponse(browser))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
     }
 }

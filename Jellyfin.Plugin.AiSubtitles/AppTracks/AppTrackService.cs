@@ -24,10 +24,28 @@ namespace Jellyfin.Plugin.AiSubtitles.AppTracks;
 public sealed record AppTrackJob(IReadOnlyList<Task<List<SubtitleCue>>> Batches);
 
 /// <summary>
+/// A translated track of a media source.
+/// </summary>
+/// <param name="Index">Stream index the clients see.</param>
+/// <param name="SourceIndex">Index of the original subtitle stream.</param>
+/// <param name="Language">Target language.</param>
+public sealed record AppTrack(int Index, int SourceIndex, AppLanguage Language);
+
+/// <summary>
+/// The translated tracks of one media source.
+/// </summary>
+/// <param name="Item">Item.</param>
+/// <param name="MediaSourceId">Media source id.</param>
+/// <param name="Tracks">Tracks.</param>
+public sealed record TrackLayout(BaseItem Item, string MediaSourceId, IReadOnlyList<AppTrack> Tracks);
+
+/// <summary>
 /// Languages, user preferences and background translations for the tracks offered to all apps.
 /// </summary>
 public class AppTrackService
 {
+    private static readonly TimeSpan LayoutLifetime = TimeSpan.FromSeconds(60);
+
     private readonly SubtitleSourceService _sourceService;
     private readonly TranslationService _translationService;
     private readonly ILocalizationManager _localization;
@@ -36,6 +54,7 @@ public class AppTrackService
     private readonly ILogger<AppTrackService> _logger;
     private readonly ConcurrentDictionary<string, Lazy<Task<AppTrackJob>>> _jobs = new();
     private readonly ConcurrentDictionary<string, (string? Key, string? Name)> _languageInfo = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (DateTime Created, TrackLayout? Layout)> _layouts = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AppTrackService"/> class.
@@ -192,14 +211,15 @@ public class AppTrackService
     }
 
     /// <summary>
-    /// Lists the translated tracks offered for a media source.
+    /// Lists the translated tracks offered for a media source, numbered like <see cref="AppTrackInjector"/> does.
     /// </summary>
     /// <param name="source">Media source.</param>
-    /// <returns>Virtual index, original stream index and language of each track.</returns>
-    public List<(int Index, int SourceIndex, AppLanguage Language)> GetTracks(MediaSourceInfo source)
+    /// <returns>Tracks.</returns>
+    public List<AppTrack> GetTracks(MediaSourceInfo source)
     {
         var streams = SubtitleSourceService.GetTextStreams(source);
-        var result = new List<(int, int, AppLanguage)>();
+        var next = AppTrackInjector.FirstFreeIndex(source.MediaStreams.Select(s => s.Index).ToList());
+        var result = new List<AppTrack>();
         foreach (var language in GetLanguages())
         {
             if (AppTrackInjector.HasNativeTrack(streams, language.Target.Key, LanguageKey))
@@ -210,11 +230,69 @@ public class AppTrackService
             var pick = AppTrackInjector.PickSource(streams, language.Target.Key, LanguageKey);
             if (pick is not null)
             {
-                result.Add((AppTrackInjector.Encode(language.Position, pick.Index), pick.Index, language));
+                result.Add(new AppTrack(next++, pick.Index, language));
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Gets the translated tracks of an item's media source (cached briefly; called for many requests).
+    /// </summary>
+    /// <param name="itemId">Item id.</param>
+    /// <param name="mediaSourceId">Media source id (null = first).</param>
+    /// <returns>Layout, or null if the item does not exist or has no tracks.</returns>
+    public virtual TrackLayout? GetLayout(Guid itemId, string? mediaSourceId)
+    {
+        var key = $"{itemId:N}|{mediaSourceId}";
+        if (_layouts.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.Created < LayoutLifetime)
+        {
+            return cached.Layout;
+        }
+
+        TrackLayout? layout = null;
+        try
+        {
+            var item = _sourceService.GetItem(itemId);
+            var source = _sourceService.GetMediaSource(item, mediaSourceId);
+            var tracks = GetTracks(source);
+            if (tracks.Count > 0 && source.Id is not null)
+            {
+                layout = new TrackLayout(item, source.Id, tracks);
+            }
+        }
+        catch (Exception ex) when (ex is System.IO.FileNotFoundException or ArgumentException or InvalidOperationException)
+        {
+            // not a video with subtitles
+        }
+
+        if (_layouts.Count > 500)
+        {
+            _layouts.Clear();
+        }
+
+        _layouts[key] = (DateTime.UtcNow, layout);
+        return layout;
+    }
+
+    /// <summary>
+    /// Finds the translated track behind a stream index, if it is one.
+    /// </summary>
+    /// <param name="itemId">Item id.</param>
+    /// <param name="mediaSourceId">Media source id.</param>
+    /// <param name="index">Stream index.</param>
+    /// <returns>Layout and track, or null for real streams.</returns>
+    public (TrackLayout Layout, AppTrack Track)? Resolve(Guid itemId, string? mediaSourceId, int index)
+    {
+        if (index < 0)
+        {
+            return null;
+        }
+
+        var layout = GetLayout(itemId, mediaSourceId);
+        var track = layout?.Tracks.FirstOrDefault(t => t.Index == index);
+        return track is null ? null : (layout!, track);
     }
 
     /// <summary>

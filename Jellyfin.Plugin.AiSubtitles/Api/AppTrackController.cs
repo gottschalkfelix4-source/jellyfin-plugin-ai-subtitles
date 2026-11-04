@@ -78,7 +78,7 @@ public class AppTrackController : ControllerBase
         [FromQuery] bool addVttTimeMap = false,
         [FromQuery] long? vttTimestampMapMpegts = null)
     {
-        var resolved = Resolve(itemId, index);
+        var resolved = Resolve(itemId, mediaSourceId, index);
         if (resolved is null)
         {
             Response.StatusCode = StatusCodes.Status404NotFound;
@@ -144,7 +144,7 @@ public class AppTrackController : ControllerBase
         [FromQuery] int segmentLength = 30,
         [FromQuery] long? vttTimestampMapMpegts = null)
     {
-        var resolved = Resolve(itemId, index);
+        var resolved = Resolve(itemId, mediaSourceId, index);
         if (resolved is null)
         {
             return NotFound();
@@ -170,28 +170,14 @@ public class AppTrackController : ControllerBase
         return Content(playlist, "application/x-mpegURL; charset=utf-8");
     }
 
-    private (MediaBrowser.Controller.Entities.BaseItem Item, AppLanguage Language, int SourceIndex)? Resolve(Guid itemId, int index)
+    private (MediaBrowser.Controller.Entities.BaseItem Item, AppLanguage Language, int SourceIndex)? Resolve(Guid itemId, string mediaSourceId, int index)
     {
-        if (!Plugin.CurrentConfiguration.EnableAppTracks || !AppTrackInjector.IsVirtual(index))
+        if (!Plugin.CurrentConfiguration.EnableAppTracks || _service.Resolve(itemId, mediaSourceId, index) is not { } found)
         {
             return null;
         }
 
-        var (position, sourceIndex) = AppTrackInjector.Decode(index);
-        var language = _service.GetLanguages().FirstOrDefault(l => l.Position == position);
-        if (language is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return (_sourceService.GetItem(itemId), language, sourceIndex);
-        }
-        catch (FileNotFoundException)
-        {
-            return null;
-        }
+        return (found.Layout.Item, found.Track.Language, found.Track.SourceIndex);
     }
 
     private async Task WriteWholeTrackAsync(AppTrackJob job, OutputFormat output, CancellationToken ct)

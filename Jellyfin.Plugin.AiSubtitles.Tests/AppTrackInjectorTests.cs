@@ -62,7 +62,11 @@ public class AppTrackInjectorTests
         var track = Assert.Single(added);
         Assert.Null(selected);
         Assert.Equal(3, track.SourceIndex); // forced track is skipped
-        Assert.Equal(AppTrackInjector.Encode(0, 3), track.Index);
+        Assert.Equal(5, track.Index); // directly after the five existing streams
+
+        // The web player looks up a preselected subtitle by position: MediaStreams[index] must be the track.
+        var atPosition = root["MediaSources"]![0]!["MediaStreams"]![track.Index]!;
+        Assert.Equal(track.Index, atPosition["Index"]!.GetValue<int>());
 
         var stream = root["MediaSources"]![0]!["MediaStreams"]!.AsArray().Last()!;
         Assert.Equal("Subtitle", stream["Type"]!.GetValue<string>());
@@ -93,7 +97,7 @@ public class AppTrackInjectorTests
     public void KeepsRequestedVirtualTrackSelected()
     {
         var root = JsonNode.Parse(PlaybackInfo.Replace("\"DefaultSubtitleStreamIndex\": 3", "\"DefaultSubtitleStreamIndex\": -1"))!;
-        var index = AppTrackInjector.Encode(0, 3);
+        var index = 5;
         AppTrackInjector.Inject(root, Options(requested: index), out var selected);
         Assert.NotNull(selected);
         Assert.Equal(index, root["MediaSources"]![0]!["DefaultSubtitleStreamIndex"]!.GetValue<int>());
@@ -144,7 +148,7 @@ public class AppTrackInjectorTests
 
         Assert.Single(added);
         var top = root["mediaStreams"]!.AsArray().Last()!;
-        Assert.Equal(AppTrackInjector.Encode(0, 5), top["index"]!.GetValue<int>());
+        Assert.Equal(6, top["index"]!.GetValue<int>()); // after the highest existing index (5)
         Assert.Null(top["deliveryUrl"]);
         Assert.Equal(2, root["mediaSources"]![0]!["mediaStreams"]!.AsArray().Count);
     }
@@ -157,12 +161,19 @@ public class AppTrackInjectorTests
     }
 
     [Fact]
-    public void EncodeDecodeRoundTrip()
+    public void FirstFreeIndexFollowsExistingStreams()
     {
-        var index = AppTrackInjector.Encode(3, 17);
-        Assert.True(AppTrackInjector.IsVirtual(index));
-        Assert.Equal((3, 17), AppTrackInjector.Decode(index));
-        Assert.False(AppTrackInjector.IsVirtual(17));
+        Assert.Equal(0, AppTrackInjector.FirstFreeIndex([]));
+        Assert.Equal(4, AppTrackInjector.FirstFreeIndex([0, 1, 2, 3]));
+        Assert.Equal(8, AppTrackInjector.FirstFreeIndex([0, 1, 7]));
+    }
+
+    [Fact]
+    public void NumbersSeveralLanguagesConsecutively()
+    {
+        var root = JsonNode.Parse(PlaybackInfo)!;
+        var added = AppTrackInjector.Inject(root, Options(languages: [German, French]), out _);
+        Assert.Equal([5, 6], added.Select(a => a.Index).ToArray());
     }
 
     [Theory]
