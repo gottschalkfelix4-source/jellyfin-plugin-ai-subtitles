@@ -1,0 +1,305 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>KI-Untertitel</title>
+</head>
+<body>
+<div id="AiSubtitlesConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox,emby-textarea">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="AiSubtitlesConfigForm">
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">KI-Untertitel-Übersetzer</h2>
+                    <p>Übersetzt vorhandene Text-Untertitel (SRT, ASS, WebVTT, eingebettet oder extern) live im Web-Player in eine beliebige Sprache.</p>
+                    <div id="aiInjectionStatus" class="fieldDescription"></div>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">KI-Anbieter</h3>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="Provider">Anbieter</label>
+                        <select is="emby-select" id="Provider" class="emby-select-withcolor emby-select">
+                            <option value="Anthropic">Anthropic (Claude)</option>
+                            <option value="OpenAiCompatible">OpenAI-kompatibel (OpenAI, Ollama, LM Studio, OpenRouter, vLLM …)</option>
+                        </select>
+                    </div>
+
+                    <div id="anthropicSection">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnthropicApiKey">API-Schlüssel</label>
+                            <input is="emby-input" type="password" id="AnthropicApiKey" autocomplete="off" />
+                            <div class="fieldDescription">Aus der Claude Console (console.anthropic.com → API Keys).</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnthropicModel">Modell</label>
+                            <input is="emby-input" type="text" id="AnthropicModel" list="anthropicModels" />
+                            <datalist id="anthropicModels">
+                                <option value="claude-opus-5-5">
+                                <option value="claude-sonnet-5-5">
+                                <option value="claude-haiku-5-5">
+                            </datalist>
+                            <div class="fieldDescription">claude-opus-5-5 liefert die beste Qualität. claude-haiku-5-5 ist deutlich günstiger und schneller und für Untertitel meist ausreichend.</div>
+                        </div>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="AnthropicEffort">Effort</label>
+                            <select is="emby-select" id="AnthropicEffort" class="emby-select-withcolor emby-select">
+                                <option value="low">low (schnell, empfohlen)</option>
+                                <option value="medium">medium</option>
+                                <option value="high">high</option>
+                                <option value="xhigh">xhigh</option>
+                                <option value="max">max</option>
+                            </select>
+                            <div class="fieldDescription">Wie gründlich das Modell nachdenkt. Für Untertitel reicht „low“; höhere Stufen kosten mehr Zeit und Tokens.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnthropicBaseUrl">Endpunkt</label>
+                            <input is="emby-input" type="text" id="AnthropicBaseUrl" />
+                            <div class="fieldDescription">Standard: https://api.anthropic.com – nur für einen Proxy oder ein Gateway ändern.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input is="emby-checkbox" type="checkbox" id="AnthropicServerFallback" />
+                                <span>Server-seitigen Fallback bei Ablehnung anfordern</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Lehnt das Modell einen Abschnitt aus Richtlinien-Gründen ab, versucht die API automatisch ein Ersatzmodell (Beta-Funktion). Bei Proxys, die das nicht kennen, ausschalten.</div>
+                        </div>
+                    </div>
+
+                    <div id="openAiSection">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="OpenAiBaseUrl">Basis-URL</label>
+                            <input is="emby-input" type="text" id="OpenAiBaseUrl" />
+                            <div class="fieldDescription">Bis einschließlich /v1, z. B. https://api.openai.com/v1, http://ollama:11434/v1, http://192.168.1.10:1234/v1 (LM Studio), https://openrouter.ai/api/v1</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="OpenAiApiKey">API-Schlüssel</label>
+                            <input is="emby-input" type="password" id="OpenAiApiKey" autocomplete="off" />
+                            <div class="fieldDescription">Für lokale Server meist leer lassen.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="OpenAiModel">Modell</label>
+                            <input is="emby-input" type="text" id="OpenAiModel" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="OpenAiTemperature">Temperatur</label>
+                            <input is="emby-input" type="text" id="OpenAiTemperature" />
+                            <div class="fieldDescription">Leer lassen, wenn das Modell keine Temperatur akzeptiert (z. B. Reasoning-Modelle).</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input is="emby-checkbox" type="checkbox" id="OpenAiJsonMode" />
+                                <span>JSON-Modus (response_format) senden</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Ausschalten, falls der Server den Parameter ablehnt.</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="button" id="aiTestButton" class="raised button-alt block emby-button">
+                            <span>Speichern &amp; Verbindung testen</span>
+                        </button>
+                        <pre id="aiTestResult" style="white-space: pre-wrap; display: none; padding: .8em; border-radius: 6px; background: rgba(127,127,127,.15);"></pre>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Übersetzung</h3>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DefaultTargetLanguage">Standard-Zielsprache (Code)</label>
+                        <input is="emby-input" type="text" id="DefaultTargetLanguage" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="textareaLabel" for="Languages">Sprachen im Player-Menü (eine pro Zeile: code=Name)</label>
+                        <textarea is="emby-textarea" id="Languages" rows="8" class="emby-textarea"></textarea>
+                        <div class="fieldDescription">Zusätzlich kann im Player jede beliebige Sprache frei eingegeben werden.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="textareaLabel" for="ExtraInstructions">Zusätzliche Anweisungen an die KI (optional)</label>
+                        <textarea is="emby-textarea" id="ExtraInstructions" rows="3" class="emby-textarea"></textarea>
+                        <div class="fieldDescription">Zum Beispiel: „Duzen statt siezen“ oder „Fachbegriffe aus Star Trek nach der deutschen Synchronfassung übersetzen“.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="BatchSize">Zeilen pro KI-Anfrage</label>
+                        <input is="emby-input" type="number" id="BatchSize" min="5" max="200" />
+                        <div class="fieldDescription">Kleiner = schnellerer Start, größer = weniger Anfragen. Standard 40.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ContextLines">Kontextzeilen</label>
+                        <input is="emby-input" type="number" id="ContextLines" min="0" max="50" />
+                        <div class="fieldDescription">Wie viele vorherige Zeilen als Kontext mitgeschickt werden.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="MaxParallelRequests">Parallele KI-Anfragen (serverweit)</label>
+                        <input is="emby-input" type="number" id="MaxParallelRequests" min="1" max="16" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="RequestTimeoutSeconds">Zeitlimit pro Anfrage (Sekunden)</label>
+                        <input is="emby-input" type="number" id="RequestTimeoutSeconds" min="10" max="900" />
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Einbindung</h3>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="EnableWebPlayerIntegration" />
+                            <span>Übersetzen-Button im Web-Player</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Gilt für den Browser und die Apps, die die Server-Oberfläche verwenden (Jellyfin Media Player, Android-App). Nach dem Umschalten die Seite neu laden.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="EnableSubtitleProvider" />
+                            <span>In „Untertitel suchen“ anbieten</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Die Übersetzung erscheint als Suchergebnis und wird beim Herunterladen dauerhaft gespeichert. Der automatische Untertitel-Download des Servers wird dabei bewusst übergangen, damit nicht ungewollt ganze Bibliotheken übersetzt werden.</div>
+                    </div>
+                    <div class="checkboxContainer">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="AllowNonAdminSave" />
+                            <span>Auch Nicht-Admins dürfen Übersetzungen als Untertitel speichern</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Cache</h3>
+                    <p id="aiCacheInfo" class="fieldDescription">…</p>
+                    <button is="emby-button" type="button" id="aiClearCache" class="raised button-alt emby-button"><span>Cache leeren</span></button>
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Speichern</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '7c3e9a51-2f4b-4d8e-9b61-5a0d2c8e4f17';
+            var page = document.querySelector('#AiSubtitlesConfigPage');
+            var textFields = ['OpenAiBaseUrl', 'OpenAiApiKey', 'OpenAiModel', 'OpenAiTemperature', 'AnthropicBaseUrl', 'AnthropicApiKey',
+                'AnthropicModel', 'DefaultTargetLanguage', 'Languages', 'ExtraInstructions'];
+            var numberFields = ['BatchSize', 'ContextLines', 'MaxParallelRequests', 'RequestTimeoutSeconds'];
+            var boolFields = ['OpenAiJsonMode', 'AnthropicServerFallback', 'EnableWebPlayerIntegration', 'EnableSubtitleProvider', 'AllowNonAdminSave'];
+
+            function $(id) { return page.querySelector('#' + id); }
+
+            function providerName(value) {
+                if (value === 1 || value === '1') { return 'Anthropic'; }
+                if (value === 0 || value === '0') { return 'OpenAiCompatible'; }
+                return value || 'Anthropic';
+            }
+
+            function updateSections() {
+                var anthropic = $('Provider').value === 'Anthropic';
+                $('anthropicSection').style.display = anthropic ? '' : 'none';
+                $('openAiSection').style.display = anthropic ? 'none' : '';
+            }
+
+            function formatBytes(b) {
+                if (b < 1024) { return b + ' B'; }
+                if (b < 1048576) { return (b / 1024).toFixed(1) + ' KB'; }
+                return (b / 1048576).toFixed(1) + ' MB';
+            }
+
+            function loadCacheInfo() {
+                ApiClient.getJSON(ApiClient.getUrl('AiSubtitles/CacheInfo')).then(function (info) {
+                    $('aiCacheInfo').textContent = info.files + ' übersetzte Abschnitte gespeichert (' + formatBytes(info.bytes) + '). Bereits übersetzte Stellen kosten beim erneuten Ansehen nichts.';
+                }, function () {
+                    $('aiCacheInfo').textContent = 'Cache-Info nicht verfügbar.';
+                });
+            }
+
+            function checkInjection() {
+                var el = $('aiInjectionStatus');
+                fetch(ApiClient.getUrl('web/index.html'), { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (html) {
+                    if (html.indexOf('data-ai-subtitles') >= 0) {
+                        el.innerHTML = '<span style="color:#4caf50">●</span> Player-Integration aktiv: Im Video-Player erscheint neben dem Untertitel-Symbol ein Übersetzen-Button.';
+                    } else {
+                        el.innerHTML = '<span style="color:#ff9800">●</span> Das Player-Skript wird derzeit nicht ausgeliefert. Ist „Übersetzen-Button im Web-Player“ aktiv? Nach der Installation muss der Server einmal neu gestartet werden. ' +
+                            'Alternativ lässt sich das Skript über das Plugin „JavaScript Injector“ einbinden: <code>' +
+                            ApiClient.getUrl('AiSubtitles/ClientScript').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</code>';
+                    }
+                }).catch(function () {
+                    el.textContent = '';
+                });
+            }
+
+            function loadConfig() {
+                Dashboard.showLoadingMsg();
+                return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    $('Provider').value = providerName(config.Provider);
+                    $('AnthropicEffort').value = config.AnthropicEffort || 'low';
+                    textFields.forEach(function (f) { $(f).value = config[f] == null ? '' : config[f]; });
+                    numberFields.forEach(function (f) { $(f).value = config[f]; });
+                    boolFields.forEach(function (f) { $(f).checked = !!config[f]; });
+                    updateSections();
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function saveConfig() {
+                Dashboard.showLoadingMsg();
+                return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.Provider = $('Provider').value;
+                    config.AnthropicEffort = $('AnthropicEffort').value;
+                    textFields.forEach(function (f) { config[f] = $(f).value; });
+                    numberFields.forEach(function (f) {
+                        var v = parseInt($(f).value, 10);
+                        if (!isNaN(v)) { config[f] = v; }
+                    });
+                    boolFields.forEach(function (f) { config[f] = $(f).checked; });
+                    return ApiClient.updatePluginConfiguration(pluginId, config);
+                });
+            }
+
+            page.addEventListener('pageshow', function () {
+                loadConfig();
+                loadCacheInfo();
+                checkInjection();
+            });
+
+            $('Provider').addEventListener('change', updateSections);
+
+            page.querySelector('#AiSubtitlesConfigForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                saveConfig().then(Dashboard.processPluginConfigurationUpdateResult);
+                return false;
+            });
+
+            $('aiTestButton').addEventListener('click', function () {
+                var out = $('aiTestResult');
+                out.style.display = '';
+                out.textContent = 'Speichere und sende Testanfrage …';
+                saveConfig().then(function () {
+                    Dashboard.hideLoadingMsg();
+                    return ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('AiSubtitles/Test', { lang: $('DefaultTargetLanguage').value || 'de' }),
+                        dataType: 'json'
+                    });
+                }).then(function (res) {
+                    out.textContent = (res.ok ? '✔ ' : '✖ ') + res.message + ' (' + res.ms + ' ms)' +
+                        (res.lines ? '\n\n' + res.lines.join('\n—\n') : '');
+                }, function (err) {
+                    Dashboard.hideLoadingMsg();
+                    out.textContent = '✖ Fehler: ' + (err && err.status ? 'HTTP ' + err.status : err);
+                });
+            });
+
+            $('aiClearCache').addEventListener('click', function () {
+                ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('AiSubtitles/ClearCache'), dataType: 'json' }).then(function () {
+                    loadCacheInfo();
+                    Dashboard.alert('Cache geleert.');
+                });
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>
