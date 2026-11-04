@@ -121,7 +121,7 @@ public class AppTrackMiddlewareTests
     }
 
     [Fact]
-    public async Task ItemDetailsListTrackButNotForBrowser()
+    public async Task ItemDetailsListTrackForAppsAndBrowser()
     {
         var middleware = new AppTrackMiddleware(Respond(PlaybackInfoJson), CreateService(), NullLogger<AppTrackMiddleware>.Instance);
 
@@ -131,6 +131,6 @@ public class AppTrackMiddlewareTests
 
         var browser = Context("GET", $"/Items/{ItemId}", client: "Jellyfin Web");
         await middleware.InvokeAsync(browser);
-        Assert.Equal(2, JsonNode.Parse(await ReadResponse(browser))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
+        Assert.Equal(3, JsonNode.Parse(await ReadResponse(browser))!["MediaSources"]![0]!["MediaStreams"]!.AsArray().Count);
     }
 }

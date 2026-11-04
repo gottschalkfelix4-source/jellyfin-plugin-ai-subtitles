@@ -11,8 +11,7 @@
             <form id="AiSubtitlesConfigForm">
                 <div class="verticalSection">
                     <h2 class="sectionTitle">KI-Untertitel-Übersetzer</h2>
-                    <p>Übersetzt vorhandene Text-Untertitel (SRT, ASS, WebVTT, eingebettet oder extern) live im Web-Player in eine beliebige Sprache.</p>
-                    <div id="aiInjectionStatus" class="fieldDescription"></div>
+                    <p>Übersetzt vorhandene Text-Untertitel (SRT, ASS, WebVTT, eingebettet oder extern) und bietet die Übersetzung in allen Jellyfin-Apps als zusätzliche Untertitelspur an.</p>
                 </div>
 
                 <div class="verticalSection">
@@ -110,9 +109,9 @@
                         <input is="emby-input" type="text" id="DefaultTargetLanguage" />
                     </div>
                     <div class="inputContainer">
-                        <label class="textareaLabel" for="Languages">Sprachen im Player-Menü (eine pro Zeile: code=Name)</label>
+                        <label class="textareaLabel" for="Languages">Bekannte Sprachen (eine pro Zeile: code=Name)</label>
                         <textarea is="emby-textarea" id="Languages" rows="8" class="emby-textarea"></textarea>
-                        <div class="fieldDescription">Zusätzlich kann im Player jede beliebige Sprache frei eingegeben werden.</div>
+                        <div class="fieldDescription">Die Namen erscheinen in den Spurtiteln und in „Untertitel suchen“.</div>
                     </div>
                     <div class="inputContainer">
                         <label class="textareaLabel" for="ExtraInstructions">Zusätzliche Anweisungen an die KI (optional)</label>
@@ -140,14 +139,7 @@
                 </div>
 
                 <div class="verticalSection">
-                    <h3 class="sectionTitle">Einbindung</h3>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label class="emby-checkbox-label">
-                            <input is="emby-checkbox" type="checkbox" id="EnableWebPlayerIntegration" />
-                            <span>Übersetzen-Button im Web-Player</span>
-                        </label>
-                        <div class="fieldDescription checkboxFieldDescription">Gilt für den Browser und die Apps, die die Server-Oberfläche verwenden (Jellyfin Media Player, Android-App). Nach dem Umschalten die Seite neu laden.</div>
-                    </div>
+                    <h3 class="sectionTitle">Dauerhaft speichern</h3>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="EnableSubtitleProvider" />
@@ -164,8 +156,8 @@
                 </div>
 
                 <div class="verticalSection">
-                    <h3 class="sectionTitle">Alle Apps (TV, Handy, Apple TV …)</h3>
-                    <p class="fieldDescription">Die Übersetzung erscheint in jeder Jellyfin-App als normale Untertitelspur, z. B. „Deutsch (KI)“ – auch auf Samsung/LG-Fernsehern, Android TV, Apple TV, iPhone und Roku. Die Apps laden eine Spur immer am Stück: Beim ersten Mal erscheinen die Untertitel daher erst, wenn der ganze Film übersetzt ist (je nach Modell etwa 1–5 Minuten). Danach kommt die Spur sofort aus dem Cache.</p>
+                    <h3 class="sectionTitle">Untertitelspuren in allen Apps</h3>
+                    <p class="fieldDescription">Die Übersetzung erscheint in jeder Jellyfin-App als normale Untertitelspur, z. B. „Deutsch (KI)“ – im Browser ebenso wie auf Samsung/LG-Fernsehern, Android TV, Apple TV, iPhone und Roku. Die Apps laden eine Spur immer am Stück: Beim ersten Mal erscheinen die Untertitel daher erst, wenn der ganze Film übersetzt ist (je nach Modell etwa 1–5 Minuten). Danach kommt die Spur sofort aus dem Cache.</p>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="EnableAppTracks" />
@@ -191,13 +183,6 @@
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">Ist eine Folge fertig übersetzt, wird die nächste Folge der Serie im Hintergrund übersetzt, damit ihre Untertitel sofort da sind.</div>
                     </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label class="emby-checkbox-label">
-                            <input is="emby-checkbox" type="checkbox" id="AppTracksInWebClient" />
-                            <span>Spuren auch im Browser anzeigen</span>
-                        </label>
-                        <div class="fieldDescription checkboxFieldDescription">Der Browser hat den Übersetzen-Button mit Live-Übersetzung; die zusätzlichen Spuren sind dort meist nicht nötig.</div>
-                    </div>
                 </div>
 
                 <div class="verticalSection">
@@ -222,8 +207,8 @@
             var textFields = ['OpenAiBaseUrl', 'OpenAiApiKey', 'OpenAiModel', 'OpenAiTemperature', 'AnthropicBaseUrl', 'AnthropicApiKey',
                 'AnthropicModel', 'DefaultTargetLanguage', 'Languages', 'ExtraInstructions', 'AppTrackLanguages'];
             var numberFields = ['BatchSize', 'ContextLines', 'MaxParallelRequests', 'RequestTimeoutSeconds'];
-            var boolFields = ['OpenAiJsonMode', 'AnthropicServerFallback', 'EnableWebPlayerIntegration', 'EnableSubtitleProvider', 'AllowNonAdminSave',
-                'EnableAppTracks', 'AutoSelectAppTrack', 'PrefetchNextEpisode', 'AppTracksInWebClient'];
+            var boolFields = ['OpenAiJsonMode', 'AnthropicServerFallback', 'EnableSubtitleProvider', 'AllowNonAdminSave',
+                'EnableAppTracks', 'AutoSelectAppTrack', 'PrefetchNextEpisode'];
 
             function $(id) { return page.querySelector('#' + id); }
 
@@ -250,21 +235,6 @@
                     $('aiCacheInfo').textContent = info.files + ' übersetzte Abschnitte gespeichert (' + formatBytes(info.bytes) + '). Bereits übersetzte Stellen kosten beim erneuten Ansehen nichts.';
                 }, function () {
                     $('aiCacheInfo').textContent = 'Cache-Info nicht verfügbar.';
-                });
-            }
-
-            function checkInjection() {
-                var el = $('aiInjectionStatus');
-                fetch(ApiClient.getUrl('web/index.html'), { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (html) {
-                    if (html.indexOf('data-ai-subtitles') >= 0) {
-                        el.innerHTML = '<span style="color:#4caf50">●</span> Player-Integration aktiv: Im Video-Player erscheint neben dem Untertitel-Symbol ein Übersetzen-Button.';
-                    } else {
-                        el.innerHTML = '<span style="color:#ff9800">●</span> Das Player-Skript wird derzeit nicht ausgeliefert. Ist „Übersetzen-Button im Web-Player“ aktiv? Nach der Installation muss der Server einmal neu gestartet werden. ' +
-                            'Alternativ lässt sich das Skript über das Plugin „JavaScript Injector“ einbinden: <code>' +
-                            ApiClient.getUrl('AiSubtitles/ClientScript').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</code>';
-                    }
-                }).catch(function () {
-                    el.textContent = '';
                 });
             }
 
@@ -299,7 +269,6 @@
             page.addEventListener('pageshow', function () {
                 loadConfig();
                 loadCacheInfo();
-                checkInjection();
             });
 
             $('Provider').addEventListener('change', updateSections);

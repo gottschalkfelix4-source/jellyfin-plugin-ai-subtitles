@@ -70,12 +70,6 @@ public partial class AppTrackMiddleware
         // 2. Jellyfin itself must never see a virtual index (it would try to burn in a stream that does not exist).
         var requested = StripVirtualIndexFromQuery(request);
 
-        if (!config.AppTracksInWebClient && IsBrowserClient(request))
-        {
-            await _next(context).ConfigureAwait(false);
-            return;
-        }
-
         var playbackInfo = PlaybackInfoRegex().Match(path);
         if (playbackInfo.Success && (HttpMethods.IsPost(request.Method) || HttpMethods.IsGet(request.Method)))
         {
@@ -308,12 +302,6 @@ public partial class AppTrackMiddleware
         }
 
         return requested;
-    }
-
-    private static bool IsBrowserClient(HttpRequest request)
-    {
-        var client = AuthValue(request, "Client");
-        return string.Equals(client, "Jellyfin Web", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? GetAccessToken(HttpRequest request)

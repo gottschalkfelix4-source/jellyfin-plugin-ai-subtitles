@@ -2,7 +2,6 @@ using Jellyfin.Plugin.AiSubtitles.AppTracks;
 using Jellyfin.Plugin.AiSubtitles.Providers;
 using Jellyfin.Plugin.AiSubtitles.Subtitles;
 using Jellyfin.Plugin.AiSubtitles.Translation;
-using Jellyfin.Plugin.AiSubtitles.Web;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.AspNetCore.Hosting;
@@ -28,6 +27,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<AppTrackService>();
 
         // AiSubtitleProvider (ISubtitleProvider) is discovered automatically by Jellyfin's export scan.
-        serviceCollection.AddTransient<IStartupFilter, ScriptInjectionStartupFilter>();
+        serviceCollection.AddTransient<IStartupFilter, AppTrackStartupFilter>();
     }
 }

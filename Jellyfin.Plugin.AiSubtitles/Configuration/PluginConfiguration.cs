@@ -110,7 +110,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public string ExtraInstructions { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the language list shown in the player, one "code=Name" per line.
+    /// Gets or sets the known languages, one "code=Name" per line (names for prompts, track titles and the subtitle search).
     /// </summary>
     public string Languages { get; set; } =
         "de=Deutsch\nen=English\nfr=Français\nes=Español\nit=Italiano\nnl=Nederlands\npl=Polski\npt=Português\ntr=Türkçe\nru=Русский\nuk=Українська\nja=日本語\nko=한국어\nzh=中文\nar=العربية";
@@ -121,11 +121,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public string DefaultTargetLanguage { get; set; } = "de";
 
     // ---------- Integration ----------
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the player script is injected into the web client.
-    /// </summary>
-    public bool EnableWebPlayerIntegration { get; set; } = true;
 
     /// <summary>
     /// Gets or sets a value indicating whether the plugin shows up in the "search subtitles" dialog.
@@ -148,11 +143,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the languages offered as tracks in all apps (codes, separated by comma or space).
     /// </summary>
     public string AppTrackLanguages { get; set; } = "de";
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the tracks are also listed in the browser (which has its own live menu).
-    /// </summary>
-    public bool AppTracksInWebClient { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the translated track is preselected when the server would otherwise

@@ -28,15 +28,6 @@ namespace Jellyfin.Plugin.AiSubtitles.Api;
 [Route("AiSubtitles")]
 public class AiSubtitlesController : ControllerBase
 {
-    private static readonly Lazy<string> ClientScriptSource = new(() =>
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-        using var stream = assembly.GetManifestResourceStream(typeof(Plugin).Namespace + ".Web.aisubtitles.js")
-            ?? throw new InvalidOperationException("Eingebettetes Skript fehlt.");
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
-    });
-
     private readonly SubtitleSourceService _sourceService;
     private readonly TranslationService _translationService;
     private readonly TranslationCache _cache;
@@ -70,40 +61,6 @@ public class AiSubtitlesController : ControllerBase
     private bool IsAdmin => User.IsInRole("Administrator");
 
     /// <summary>
-    /// Serves the player script.
-    /// </summary>
-    /// <returns>JavaScript.</returns>
-    [HttpGet("ClientScript")]
-    [AllowAnonymous]
-    [Produces("application/javascript")]
-    public ActionResult GetClientScript()
-    {
-        Response.Headers.CacheControl = "no-cache";
-        return Content(ClientScriptSource.Value, "application/javascript; charset=utf-8");
-    }
-
-    /// <summary>
-    /// Settings for the player script.
-    /// </summary>
-    /// <returns>Client configuration.</returns>
-    [HttpGet("ClientConfig")]
-    [Authorize]
-    public ActionResult<ClientConfigDto> GetClientConfig()
-    {
-        var config = Config;
-        var configured = config.Provider == AiProviderType.Anthropic
-            ? !string.IsNullOrWhiteSpace(config.AnthropicApiKey)
-            : !string.IsNullOrWhiteSpace(config.OpenAiBaseUrl) && !string.IsNullOrWhiteSpace(config.OpenAiModel);
-
-        return new ClientConfigDto(
-            config.EnableWebPlayerIntegration,
-            LanguageResolver.GetOptions(config).Select(o => new LanguageDto(o.Code, o.Name)).ToList(),
-            string.IsNullOrWhiteSpace(config.DefaultTargetLanguage) ? "de" : config.DefaultTargetLanguage,
-            IsAdmin || config.AllowNonAdminSave,
-            configured);
-    }
-
-    /// <summary>
     /// Lists translatable (text) subtitle streams.
     /// </summary>
     /// <param name="itemId">Item id.</param>
@@ -121,72 +78,6 @@ public class AiSubtitlesController : ControllerBase
                 .Select(s => new StreamDto(s.Index, s.Language, s.Title, s.Codec, s.IsExternal, s.IsForced, s.IsDefault))
                 .ToList();
             return new StreamsDto(source.Id, streams);
-        });
-    }
-
-    /// <summary>
-    /// Returns the batch layout of a subtitle stream so the player can request what it needs.
-    /// </summary>
-    /// <param name="itemId">Item id.</param>
-    /// <param name="mediaSourceId">Media source id.</param>
-    /// <param name="streamIndex">Subtitle stream index.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Plan.</returns>
-    [HttpGet("Plan/{itemId}")]
-    [Authorize]
-    public Task<ActionResult<PlanDto>> GetPlan(
-        [FromRoute] Guid itemId,
-        [FromQuery] string? mediaSourceId,
-        [FromQuery] int streamIndex,
-        CancellationToken cancellationToken)
-    {
-        return GuardedAsync(async () =>
-        {
-            var (_, sourceId, cues) = await LoadCuesAsync(itemId, mediaSourceId, streamIndex, cancellationToken).ConfigureAwait(false);
-            var size = TranslationService.GetBatchSize();
-            var batches = TranslationService.BuildBatches(cues, size)
-                .Select(b => new BatchDto(b.Index, b.StartMs / 1000d, b.EndMs / 1000d))
-                .ToList();
-            return new PlanDto(sourceId, streamIndex, size, cues.Count, batches);
-        });
-    }
-
-    /// <summary>
-    /// Translates one batch of cues.
-    /// </summary>
-    /// <param name="itemId">Item id.</param>
-    /// <param name="mediaSourceId">Media source id.</param>
-    /// <param name="streamIndex">Subtitle stream index.</param>
-    /// <param name="lang">Target language (code, name or free text).</param>
-    /// <param name="batch">Batch index.</param>
-    /// <param name="batchSize">Batch size from the plan.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Translated cues.</returns>
-    [HttpGet("Batch/{itemId}")]
-    [Authorize]
-    public Task<ActionResult<BatchResultDto>> GetBatch(
-        [FromRoute] Guid itemId,
-        [FromQuery] string? mediaSourceId,
-        [FromQuery] int streamIndex,
-        [FromQuery] string? lang,
-        [FromQuery] int batch,
-        [FromQuery] int batchSize,
-        CancellationToken cancellationToken)
-    {
-        return GuardedAsync(async () =>
-        {
-            var (_, _, cues) = await LoadCuesAsync(itemId, mediaSourceId, streamIndex, cancellationToken).ConfigureAwait(false);
-            var batches = TranslationService.BuildBatches(cues, TranslationService.GetBatchSize(batchSize));
-            if (batch < 0 || batch >= batches.Count)
-            {
-                throw new ArgumentOutOfRangeException(nameof(batch), "Ungültige Batch-Nummer.");
-            }
-
-            var language = _translationService.ResolveLanguage(lang);
-            var translated = await _translationService
-                .TranslateBatchAsync(cues, batches[batch], language, cancellationToken)
-                .ConfigureAwait(false);
-            return new BatchResultDto(batch, translated.Select(c => new CueDto(c.StartMs / 1000d, c.EndMs / 1000d, c.Text)).ToList());
         });
     }
 
